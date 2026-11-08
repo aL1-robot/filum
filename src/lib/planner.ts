@@ -101,7 +101,7 @@ export const DEFAULT_RAW: RawParams = {
   ndl: 1,
   nz: 8,
   lin: 3,
-  lout: 7.28,
+  lout: 10,
   lw: 3,
   lr: 1.5,
   lm: 0.3,
@@ -112,7 +112,7 @@ export const DEFAULT_RAW: RawParams = {
   cv: 0,
   bw: 595,
   bh: 595,
-  f: 2000,
+  f: 3000,
   tf: 3000,
   dx: 0,
   dy: 0,
@@ -279,7 +279,7 @@ export function calibrationSequence(n: number, ib: number): number[] {
 
 export function startingPoint(): { raw: RawParams; anchors: Anchor[]; sequence: string } {
   const loop = autoLoop(prepare(DEFAULT_RAW))
-  const withLoop = { ...DEFAULT_RAW, ...loop }
+  const withLoop = { ...DEFAULT_RAW, ...loop, lout: DEFAULT_RAW.lout }
   const contact = contactOuter(prepare(withLoop))
   const raw = { ...withLoop, ...contact }
   return {
