@@ -35,8 +35,22 @@ import './App.css'
 
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 5]
 const INITIAL = startingPoint()
+const THEME_STORAGE_KEY = 'filum-theme'
+type ThemePreference = 'system' | 'light' | 'dark'
 type AppMenu = 'file' | 'settings' | 'machine'
 type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors'
+
+function storedThemePreference(): ThemePreference {
+  try {
+    const preference = window.localStorage.getItem(THEME_STORAGE_KEY)
+    return preference === 'system' || preference === 'light' || preference === 'dark'
+      ? preference
+      : 'light'
+  } catch (error) {
+    console.warn('Unable to read the saved Filum theme preference.', error)
+    return 'light'
+  }
+}
 
 const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView }[]> = {
   settings: [{ label: 'Planner settings', dialog: 'settings' }],
@@ -94,7 +108,7 @@ function AppDialog({
     >
       <header className="dialog-header">
         <div>
-          <span className="dialog-eyebrow">NEEDLE PLANNER</span>
+          <span className="dialog-eyebrow">FILUM</span>
           <h2 id={titleId}>{title}</h2>
         </div>
         <button className="dialog-close" aria-label="Close dialog" onClick={onClose}>×</button>
@@ -119,6 +133,8 @@ function formatBytes(size: number): string {
 
 function App() {
   const client = useMemo(() => new FluidNC(), [])
+  const [theme, setTheme] = useState<ThemePreference>(storedThemePreference)
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [raw, setRaw] = useState<RawParams>(INITIAL.raw)
   const [anchors, setAnchors] = useState<Anchor[]>(INITIAL.anchors)
   const [anchorAuto, setAnchorAuto] = useState(true)
@@ -162,6 +178,28 @@ function App() {
   const [fitRequest, setFitRequest] = useState(0)
   const primaryActionRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const jogRingRef = useRef<(direction: 'out' | 'in' | 'ccw' | 'cw', shift?: boolean) => void>(() => {})
+
+  useEffect(() => {
+    const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const applyTheme = () => {
+      const activeTheme = theme === 'system' ? (colorScheme.matches ? 'dark' : 'light') : theme
+      document.documentElement.dataset.theme = activeTheme
+      setResolvedTheme(activeTheme)
+    }
+
+    applyTheme()
+    if (theme !== 'system') return
+    colorScheme.addEventListener('change', applyTheme)
+    return () => colorScheme.removeEventListener('change', applyTheme)
+  }, [theme])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch (error) {
+      console.warn('Unable to save the Filum theme preference.', error)
+    }
+  }, [theme])
 
   const plan = useMemo(
     () => computePlan(raw, sequence, anchors, measurements),
@@ -708,18 +746,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-brand">
-          <div className="app-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="10.5" />
-              <path d="M8.5 9.5 23 22M8 16h16M16 5.5v21" />
-              <circle cx="8.5" cy="9.5" r="1.5" />
-              <circle cx="23" cy="22" r="1.5" />
-            </svg>
-          </div>
-          <div>
-            <h1>Needle Planner</h1>
-            <p>String art · FluidNC</p>
-          </div>
+          <h1 aria-label="filum"><span>filum</span><span className="brand-period" aria-hidden="true">.</span></h1>
         </div>
         <nav
           className="app-menu"
@@ -800,7 +827,7 @@ function App() {
 
       <main className="workspace" onClick={() => setActivePopup(null)}>
         <section className="planner-column">
-          <section className="panel planner-panel">
+          <section className="planner-panel">
             <div className="section-heading">
               <div>
                 <h2>Toolpath</h2>
@@ -819,6 +846,7 @@ function App() {
             </div>
             <PlannerCanvas
               plan={plan}
+              theme={resolvedTheme}
               anchors={anchors}
               measurements={measurements}
               machinePosition={machineStatus.pos}
@@ -862,7 +890,7 @@ function App() {
         </section>
 
         <aside className="control-column">
-          <section className="panel connection-panel">
+          <section className="connection-panel">
             <h2>Nail calibration &amp; FluidNC</h2>
             <div className="connect-row">
               <input value={address} aria-label="FluidNC address" onChange={event => setAddress(event.target.value)} />
@@ -936,6 +964,16 @@ function App() {
       </main>
       <AppDialog open={activeDialog === 'settings'} title="Planner settings" onClose={() => setActiveDialog(null)}>
         <div className="settings-dialog-content">
+          <div className="appearance-settings">
+            <label>
+              <span>Appearance</span>
+              <select value={theme} onChange={event => setTheme(event.target.value as ThemePreference)}>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">System</option>
+              </select>
+            </label>
+          </div>
           {FIELD_GROUPS.filter(group => group.title !== 'Machine and nudge').map(group => (
             <details
               key={group.title}

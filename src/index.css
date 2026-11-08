@@ -4,29 +4,84 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #25242a;
-  background: #e7e8eb;
-  --surface: #f7f7f8;
+  color: var(--heading);
+  background: var(--page-bg);
+  color-scheme: light;
+  --page-bg: #ececef;
+  --surface: #f6f6f8;
+  --surface-raised: #fff;
   --panel: #f0f1f3;
   --chrome: #27272d;
   --chrome-text: #f3f3f5;
   --chrome-muted: #a7a7b0;
-  --heading: #24212b;
+  --heading: #25242a;
   --muted: #6d6d77;
-  --border: #d7d8dd;
+  --border: #d2d3d9;
   --accent: #7444c8;
   --accent-soft: #ece7f6;
+  --canvas-bg: #fff;
+  --canvas-grid: rgb(131 124 146 / 5%);
+  --canvas-bed: #c7cbd4;
+  --canvas-label: #6e7480;
+  --canvas-machine: #17151d;
+  --control-bg: #fff;
+  --control-hover: #f0eff3;
+  --success: #239667;
+  --danger: #ad3749;
+  --danger-soft: #fff0f2;
+  --warning-bg: #fff8e9;
+  --warning-text: #79500f;
+  --warning-border: #d88a26;
+  --scrim: rgb(20 20 25 / 48%);
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page-bg: #191a1e;
+  --surface: #1d1e22;
+  --surface-raised: #24252a;
+  --panel: #202126;
+  --chrome: #1c1d21;
+  --chrome-text: #e9e9ee;
+  --chrome-muted: #a1a1ab;
+  --heading: #e7e7ec;
+  --muted: #a1a1ac;
+  --border: #38393f;
+  --accent: #b586ff;
+  --accent-soft: #352647;
+  --canvas-bg: #1d1e22;
+  --canvas-grid: rgb(177 177 190 / 5%);
+  --canvas-bed: #656873;
+  --canvas-label: #b6b7c1;
+  --canvas-machine: #e5e5eb;
+  --control-bg: #292a30;
+  --control-hover: #32333a;
+  --success: #59ca91;
+  --danger: #ef7c89;
+  --danger-soft: #3a252a;
+  --warning-bg: #382f22;
+  --warning-text: #ead09a;
+  --warning-border: #b87b2c;
+  --scrim: rgb(0 0 0 / 64%);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  color: var(--heading);
+  background: var(--page-bg);
 }
 
 button:focus-visible,
@@ -34,19 +89,19 @@ input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 .main-canvas:focus-visible {
-  outline: 2px solid #7444c8;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 button,
 input,
 textarea {
-  accent-color: #7444c8;
+  accent-color: var(--accent);
 }
 
 ::selection {
   color: #fff;
-  background: #7444c8;
+  background: var(--accent);
 }
 
 ::-webkit-scrollbar {
@@ -57,6 +112,6 @@ textarea {
 ::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 8px;
-  background: #c3c4ca;
+  background: var(--muted);
   background-clip: padding-box;
 }

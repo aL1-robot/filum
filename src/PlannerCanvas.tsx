@@ -12,6 +12,7 @@ import type { Progress } from './lib/progress.ts'
 
 type Props = {
   plan: Plan
+  theme: 'light' | 'dark'
   anchors: Anchor[]
   measurements: Measurements
   machinePosition: Vec | null
@@ -35,6 +36,16 @@ const COLORS = {
   active: '#c02960',
   machine: '#17151d',
   white: '#fff',
+}
+
+function canvasColors(canvas: HTMLCanvasElement) {
+  const styles = getComputedStyle(canvas)
+  return {
+    ...COLORS,
+    bed: styles.getPropertyValue('--canvas-bed').trim() || COLORS.bed,
+    label: styles.getPropertyValue('--canvas-label').trim() || COLORS.label,
+    machine: styles.getPropertyValue('--canvas-machine').trim() || COLORS.machine,
+  }
 }
 
 function resizeCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; width: number; height: number } | null {
@@ -85,18 +96,19 @@ function drawMain(
   const dimensions = resizeCanvas(canvas)
   if (!dimensions) return
   const { ctx } = dimensions
+  const colors = canvasColors(canvas)
   const { plan, anchors, measurements, machinePosition, selectedNail, progress } = props
   const x = (value: number) => view.ox + value * view.s
   const y = (value: number) => view.oy - value * view.s
   const center: Vec = [plan.cal.tx, plan.cal.ty]
 
   ctx.save()
-  ctx.strokeStyle = COLORS.bed
+  ctx.strokeStyle = colors.bed
   ctx.lineWidth = 1
   ctx.setLineDash([5, 4])
   ctx.strokeRect(x(0), y(plan.p.bh), plan.p.bw * view.s, plan.p.bh * view.s)
   ctx.setLineDash([])
-  ctx.fillStyle = COLORS.label
+  ctx.fillStyle = colors.label
   ctx.font = '12px system-ui, sans-serif'
   ctx.fillText('home (0,0)', x(0) + 5, y(0) - 6)
   ctx.beginPath()
@@ -104,7 +116,7 @@ function drawMain(
   ctx.fill()
 
   if (Number.isFinite(plan.cal.res)) {
-    ctx.strokeStyle = COLORS.bed
+    ctx.strokeStyle = colors.bed
     for (const radius of [plan.p.rin, plan.p.rout]) {
       ctx.beginPath()
       ctx.arc(x(center[0]), y(center[1]), radius * view.s, 0, Math.PI * 2)
@@ -114,7 +126,7 @@ function drawMain(
     const shaft = footprint(plan.p)
     const cos = Math.cos(plan.cal.th)
     const sin = Math.sin(plan.cal.th)
-    ctx.fillStyle = COLORS.nail
+    ctx.fillStyle = colors.nail
     ctx.globalAlpha = 0.18
     for (let nail = 0; nail < plan.p.n; nail++) {
       const angle = plan.p.ang(nail)
@@ -142,12 +154,12 @@ function drawMain(
     ctx.globalAlpha = 1
   }
 
-  if (plan.route.length) drawPolyline(ctx, [[0, 0], ...plan.route], x, y, COLORS.approach, 1.4, [6, 4])
+  if (plan.route.length) drawPolyline(ctx, [[0, 0], ...plan.route], x, y, colors.approach, 1.4, [6, 4])
   if (plan.exit.length && plan.mp.length) {
-    drawPolyline(ctx, [plan.mp[plan.mp.length - 1], ...plan.exit], x, y, COLORS.exit, 1.4, [6, 4])
+    drawPolyline(ctx, [plan.mp[plan.mp.length - 1], ...plan.exit], x, y, colors.exit, 1.4, [6, 4])
   }
   if (plan.mp.length) {
-    ctx.fillStyle = COLORS.approach
+    ctx.fillStyle = colors.approach
     ctx.beginPath()
     ctx.arc(x(plan.mp[0][0]), y(plan.mp[0][1]), 4, 0, Math.PI * 2)
     ctx.fill()
@@ -164,15 +176,15 @@ function drawMain(
       const b = progress.path[index + 1]
       partial.push([a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction])
     }
-    drawPolyline(ctx, partial, x, y, COLORS.path, 2)
+    drawPolyline(ctx, partial, x, y, colors.path, 2)
   } else if (plan.mp.length && props.visibleVisits > 0) {
     const lastIndex = Math.min(plan.visits, Math.floor(props.visibleVisits)) - 1
     const end = plan.vend[lastIndex]
     if (end != null && end >= 0) {
       const start = lastIndex > 0 ? plan.vend[lastIndex - 1] : 0
-      drawPolyline(ctx, plan.mp.slice(0, start + 1), x, y, COLORS.path, 1.2)
-      drawPolyline(ctx, plan.mp.slice(start, end + 1), x, y, COLORS.path, 2.4)
-      ctx.strokeStyle = COLORS.machine
+      drawPolyline(ctx, plan.mp.slice(0, start + 1), x, y, colors.path, 1.2)
+      drawPolyline(ctx, plan.mp.slice(start, end + 1), x, y, colors.path, 2.4)
+      ctx.strokeStyle = colors.machine
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.arc(x(plan.mp[end][0]), y(plan.mp[end][1]), Math.max(plan.p.ndl / 2 * view.s, 2), 0, Math.PI * 2)
@@ -183,7 +195,7 @@ function drawMain(
   for (const anchor of anchors) {
     const px = x(anchor.x)
     const py = y(anchor.y)
-    ctx.strokeStyle = COLORS.measured
+    ctx.strokeStyle = colors.measured
     ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(px - 5, py)
@@ -191,7 +203,7 @@ function drawMain(
     ctx.moveTo(px, py - 5)
     ctx.lineTo(px, py + 5)
     ctx.stroke()
-    ctx.fillStyle = COLORS.measured
+    ctx.fillStyle = colors.measured
     ctx.fillText(String(anchor.nail), px + 6, py - 6)
     if (measurements[anchor.nail - plan.p.ib]) {
       ctx.beginPath()
@@ -203,13 +215,13 @@ function drawMain(
   for (const [key, measured] of Object.entries(measurements)) {
     const nail = Number(key)
     const predicted = predict(plan.p, plan.cal, nail)
-    ctx.strokeStyle = COLORS.measured
+    ctx.strokeStyle = colors.measured
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(x(predicted[0]), y(predicted[1]))
     ctx.lineTo(x(predicted[0] + (measured[0] - predicted[0]) * 20), y(predicted[1] + (measured[1] - predicted[1]) * 20))
     ctx.stroke()
-    ctx.fillStyle = COLORS.measured
+    ctx.fillStyle = colors.measured
     ctx.beginPath()
     ctx.arc(x(measured[0]), y(measured[1]), 2.5, 0, Math.PI * 2)
     ctx.fill()
@@ -218,7 +230,7 @@ function drawMain(
   if (selectedNail != null && Number.isFinite(plan.cal.res)) {
     const predicted = predict(plan.p, plan.cal, selectedNail)
     const offset = plan.offset[selectedNail] ?? [0, 0]
-    ctx.strokeStyle = COLORS.active
+    ctx.strokeStyle = colors.active
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.arc(x(predicted[0] + offset[0]), y(predicted[1] + offset[1]), 9, 0, Math.PI * 2)
@@ -227,7 +239,7 @@ function drawMain(
   if (machinePosition) {
     const px = x(machinePosition[0])
     const py = y(machinePosition[1])
-    ctx.strokeStyle = COLORS.machine
+    ctx.strokeStyle = colors.machine
     ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.arc(px, py, Math.max(plan.p.ndl / 2 * view.s + 2, 5), 0, Math.PI * 2)
@@ -246,11 +258,12 @@ function drawLocal(canvas: HTMLCanvasElement, plan: Plan) {
   const dimensions = resizeCanvas(canvas)
   if (!dimensions) return
   const { ctx, width, height } = dimensions
+  const colors = canvasColors(canvas)
   const scale = Math.min(width, height * 2.1) / 36
   const x = (value: number) => width / 2 + (value - plan.p.Rh - 2) * scale
   const y = (value: number) => height / 2 - value * scale
   ctx.save()
-  ctx.fillStyle = COLORS.nail
+  ctx.fillStyle = colors.nail
   ctx.globalAlpha = 0.3
   for (const point of plan.ccw.footprint) {
     ctx.beginPath()
@@ -258,8 +271,8 @@ function drawLocal(canvas: HTMLCanvasElement, plan: Plan) {
     ctx.fill()
   }
   ctx.globalAlpha = 1
-  drawPolyline(ctx, plan.ccw.path, x, y, COLORS.path, 2)
-  drawPolyline(ctx, plan.cw.path, x, y, COLORS.approach, 2)
+  drawPolyline(ctx, plan.ccw.path, x, y, colors.path, 2)
+  drawPolyline(ctx, plan.cw.path, x, y, colors.approach, 2)
   ctx.restore()
 }
 
@@ -295,7 +308,7 @@ export default function PlannerCanvas(props: Props) {
     if (!view) setView(fitView(main.clientWidth, main.clientHeight, props.plan.p.bw, props.plan.p.bh))
     else drawMain(main, view, props)
     drawLocal(local, props.plan)
-  }, [props, view])
+  }, [props, props.theme, view])
 
   function fit() {
     const canvas = canvasRef.current
