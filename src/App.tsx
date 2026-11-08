@@ -37,8 +37,8 @@ const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 5]
 const INITIAL = startingPoint()
 const THEME_STORAGE_KEY = 'filum-theme'
 type ThemePreference = 'system' | 'light' | 'dark'
-type AppMenu = 'file' | 'settings' | 'machine'
-type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors'
+type AppMenu = 'file' | 'settings' | 'machine' | 'help'
+type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help'
 
 function storedThemePreference(): ThemePreference {
   try {
@@ -52,7 +52,7 @@ function storedThemePreference(): ThemePreference {
   }
 }
 
-const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView }[]> = {
+const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView; title?: string }[]> = {
   settings: [{ label: 'Planner settings', dialog: 'settings' }],
   file: [
     { label: 'Nail sequence', dialog: 'sequence' },
@@ -63,6 +63,11 @@ const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView }[]
     { label: 'Machine configuration', dialog: 'machineConfig' },
     { label: 'Calibration anchors', dialog: 'anchors' },
   ],
+  help: [{
+    label: 'Keyboard shortcuts and notes',
+    dialog: 'help',
+    title: 'Show keyboard shortcuts and map controls',
+  }],
 }
 
 function AppDialog({
@@ -111,7 +116,7 @@ function AppDialog({
           <span className="dialog-eyebrow">FILUM</span>
           <h2 id={titleId}>{title}</h2>
         </div>
-        <button className="dialog-close" aria-label="Close dialog" onClick={onClose}>×</button>
+        <button className="dialog-close" aria-label="Close dialog" title="Close this dialog" onClick={onClose}>×</button>
       </header>
       <div className="dialog-body">{children}</div>
     </dialog>
@@ -758,17 +763,18 @@ function App() {
             }
           }}
         >
-          {(['file', 'settings', 'machine'] as const).map(menu => (
+          {(['file', 'settings', 'machine', 'help'] as const).map(menu => (
             <div className="app-menu-entry" key={menu}>
               <button
                 aria-haspopup="menu"
                 aria-expanded={activePopup === menu}
+                title={`Open the ${menu} menu.`}
                 onClick={() => toggleMenu(menu)}
               >{menu[0].toUpperCase() + menu.slice(1)}</button>
               {activePopup === menu && (
                 <div className="menu-popup" role="menu">
                   {APP_MENU_ITEMS[menu].map(item => (
-                    <button role="menuitem" key={item.dialog} onClick={() => openDialog(item.dialog)}>{item.label}</button>
+                    <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => openDialog(item.dialog)}>{item.label}</button>
                   ))}
                 </div>
               )}
@@ -778,6 +784,7 @@ function App() {
         <button
           className={`hamburger-button ${mobileMenuOpen ? 'active' : ''}`}
           aria-label={mobileMenuOpen ? 'Close planner menu' : 'Open planner menu'}
+          title={mobileMenuOpen ? 'Close planner navigation.' : 'Open planner navigation.'}
           aria-expanded={mobileMenuOpen}
           onClick={() => {
             setMobileMenuOpen(value => !value)
@@ -787,7 +794,7 @@ function App() {
           <span /><span /><span />
         </button>
         <div className="header-context">Planner <span>/</span> Toolpath</div>
-        <span className={`connection-pill ${connected ? 'connected' : ''}`}>
+        <span className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}.` : 'Not connected to FluidNC.'}>
           <i />
           {connected ? machineStatus.state : 'Not connected'}
         </span>
@@ -809,14 +816,14 @@ function App() {
           >
             {activePopup ? (
               <>
-                <button className="mobile-menu-back" onClick={() => setActivePopup(null)}>‹ All menus</button>
+                <button className="mobile-menu-back" title="Return to the list of menus." onClick={() => setActivePopup(null)}>‹ All menus</button>
                 {APP_MENU_ITEMS[activePopup].map(item => (
-                  <button role="menuitem" key={item.dialog} onClick={() => openDialog(item.dialog)}>{item.label}</button>
+                  <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => openDialog(item.dialog)}>{item.label}</button>
                 ))}
               </>
             ) : (
-              (['file', 'settings', 'machine'] as const).map(menu => (
-                <button role="menuitem" key={menu} onClick={() => setActivePopup(menu)}>
+              (['file', 'settings', 'machine', 'help'] as const).map(menu => (
+                <button role="menuitem" key={menu} title={`Browse ${menu} commands.`} onClick={() => setActivePopup(menu)}>
                   <b>{menu[0].toUpperCase() + menu.slice(1)}</b><span>{APP_MENU_ITEMS[menu].map(item => item.label).join(' · ')}</span>
                 </button>
               ))
@@ -834,9 +841,9 @@ function App() {
                 <p>{progressLabel({ ...progress, show: showDoneOnly })}</p>
               </div>
               <div className="inline-actions">
-                <button onClick={() => setShowDoneOnly(value => !value)} className={showDoneOnly ? 'selected' : ''}>Done lines only</button>
-                <button onClick={() => setFitRequest(value => value + 1)}>Fit view</button>
-                <button onClick={() => { setVisibleVisits(0); setPlaying(true) }}>{playing ? 'Playing…' : '▶ Play'}</button>
+                <button title="During a run, show only thread lines the needle has finished." onClick={() => setShowDoneOnly(value => !value)} className={showDoneOnly ? 'selected' : ''}>Done lines only</button>
+                <button title="Fit the full machine bed in the map. Double-click the map for the same action." onClick={() => setFitRequest(value => value + 1)}>Fit view</button>
+                <button title="Animate the thread path from the first visit to the last." onClick={() => { setVisibleVisits(0); setPlaying(true) }}>{playing ? 'Playing…' : '▶ Play'}</button>
               </div>
             </div>
             <div className="path-legend" aria-label="Toolpath legend">
@@ -861,6 +868,7 @@ function App() {
             <div className="visit-slider">
               <input
                 type="range"
+                title="Scrub through the nail visits to reveal the toolpath up to that point."
                 min={0}
                 max={plan.visits}
                 value={visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)}
@@ -893,64 +901,64 @@ function App() {
           <section className="connection-panel">
             <h2>Nail calibration &amp; FluidNC</h2>
             <div className="connect-row">
-              <input value={address} aria-label="FluidNC address" onChange={event => setAddress(event.target.value)} />
-              <button onClick={() => void connect()}>{connected ? 'Disconnect' : 'Connect'}</button>
+              <input value={address} aria-label="FluidNC address" title="FluidNC web address, for example http://192.168.1.32/." onChange={event => setAddress(event.target.value)} />
+              <button title={connected ? 'Disconnect from the FluidNC controller.' : 'Connect to the FluidNC controller at the address above.'} onClick={() => void connect()}>{connected ? 'Disconnect' : 'Connect'}</button>
             </div>
             <p className="controller-status">
               {connected ? `${machineStatus.state} · X ${machineStatus.pos?.[0].toFixed(3) ?? '-'} · Y ${machineStatus.pos?.[1].toFixed(3) ?? '-'} · ${measuredCount} nails measured` : `Not connected · ${measuredCount} nails measured`}
               {machineStatus.sd != null && ` · SD job ${parseFloat(machineStatus.sd) || 0}%`}
             </p>
             <div className="calibration-settings">
-              <label>Measure every <input type="number" min={1} value={measureStep} onChange={event => setMeasureStep(Math.max(1, Number(event.target.value) | 0))} /> nails</label>
-              <label>Approach clearance <input type="number" min={0} step={0.5} value={clearance} onChange={event => setClearance(Number(event.target.value))} /> mm</label>
-              <label>Travel margin <input type="number" min={3} step={1} value={travelMargin} onChange={event => setTravelMargin(Number(event.target.value))} /> mm</label>
-              <label className="check-inline"><input type="checkbox" checked={autoMove} onChange={event => setAutoMove(event.target.checked)} /> auto-move to next</label>
-              <button onClick={startCalibration}>Start plan</button>
-              <button disabled={measuredCount === 0} onClick={refineCalibration}>Refine</button>
+              <label>Measure every <input type="number" title="Measure one nail after each group of this many nails." min={1} value={measureStep} onChange={event => setMeasureStep(Math.max(1, Number(event.target.value) | 0))} /> nails</label>
+              <label>Approach clearance <input type="number" title="Keep this distance from the nail before making the final approach." min={0} step={0.5} value={clearance} onChange={event => setClearance(Number(event.target.value))} /> mm</label>
+              <label>Travel margin <input type="number" title="Extra clearance used while moving between nails." min={3} step={1} value={travelMargin} onChange={event => setTravelMargin(Number(event.target.value))} /> mm</label>
+              <label className="check-inline"><input type="checkbox" title="Automatically move to the next nail after recording a measurement." checked={autoMove} onChange={event => setAutoMove(event.target.checked)} /> auto-move to next</label>
+              <button title="Create a calibration route using the configured measurement interval." onClick={startCalibration}>Start plan</button>
+              <button title="Refine the calibration route using recorded nail measurements." disabled={measuredCount === 0} onClick={refineCalibration}>Refine</button>
             </div>
             <div className="queue-progress"><i style={{ width: `${queue.length ? Math.min(queueIndex, queue.length) / queue.length * 100 : 0}%` }} /></div>
             <div className="calibration-actions">
-              <button className="primary" disabled={!connected || currentNail == null || acting || busyWithBoard} onClick={() => void primaryAction()}>
+              <button className="primary" title={arrived ? 'Record the current nail measurement and continue.' : 'Move the needle to the selected nail. Press Enter to move or record.'} disabled={!connected || currentNail == null || acting || busyWithBoard} onClick={() => void primaryAction()}>
                 {currentNail == null ? (queue.length ? 'Plan complete' : 'Start a plan') : acting ? 'Moving…' : arrived ? `Record nail ${currentNail}` : `Go to nail ${currentNail}`}
               </button>
-              <button disabled={currentNail == null} onClick={() => { setQueueIndex(index => Math.max(0, index - 1)); setArrived(false) }}>◀ Back</button>
-              <button disabled={currentNail == null} onClick={() => { setQueueIndex(index => Math.min(queue.length, index + 1)); setArrived(false) }}>Skip ▶</button>
-              <button disabled={!connected || !machineStatus.pos} onClick={() => {
+              <button title="Select the previous nail in the calibration route." disabled={currentNail == null} onClick={() => { setQueueIndex(index => Math.max(0, index - 1)); setArrived(false) }}>◀ Back</button>
+              <button title="Skip this nail and select the next one." disabled={currentNail == null} onClick={() => { setQueueIndex(index => Math.min(queue.length, index + 1)); setArrived(false) }}>Skip ▶</button>
+              <button title="Move away from the nail along the ring's outward direction." disabled={!connected || !machineStatus.pos} onClick={() => {
                 if (!machineStatus.pos) return
                 const direction = ringDirection([plan.cal.tx, plan.cal.ty], machineStatus.pos, 'out')
                 client.jog(direction[0], direction[1], 3)
               }}>Back off</button>
-              <button className="danger" disabled={!connected} onClick={stopMachine}>■ Stop</button>
-              <button disabled={!connected} onClick={() => void client.unlock()}>Unlock</button>
+              <button className="danger" title="Send feed hold and reset to stop machine motion." disabled={!connected} onClick={stopMachine}>■ Stop</button>
+              <button title="Unlock the FluidNC controller after an alarm or reset." disabled={!connected} onClick={() => void client.unlock()}>Unlock</button>
             </div>
             <div className="home-actions">
               <span>Home:</span>
-              <button disabled={!connected || acting || busyWithBoard} onClick={() => void home('$H', 'all axes')}>All axes</button>
-              <button disabled={!connected || acting || busyWithBoard} onClick={() => void home('$HX', 'X')}>X</button>
-              <button disabled={!connected || acting || busyWithBoard} onClick={() => void home('$HY', 'Y')}>Y</button>
+              <button title="Home both X and Y axes." disabled={!connected || acting || busyWithBoard} onClick={() => void home('$H', 'all axes')}>All axes</button>
+              <button title="Home the X axis." disabled={!connected || acting || busyWithBoard} onClick={() => void home('$HX', 'X')}>X</button>
+              <button title="Home the Y axis." disabled={!connected || acting || busyWithBoard} onClick={() => void home('$HY', 'Y')}>Y</button>
             </div>
-            <div className="jog-controls">
+            <div className="jog-controls" title="Use the arrow keys to jog XY, W/S to jog out/in, A/D to jog around the ring, Shift for 10× movement, and [ or ] to change the step.">
               <div className="step-buttons"><span>Jog step</span>{STEPS.map(step => (
-                <button className={jogStep === step ? 'selected' : ''} key={step} onClick={() => setJogStep(step)}>{step}</button>
+                <button className={jogStep === step ? 'selected' : ''} title={`Set the jog increment to ${step} mm.`} key={step} onClick={() => setJogStep(step)}>{step}</button>
               ))}</div>
               <div className="jog-layout">
                 <span>XY</span>
                 <div className="jog-pad">
-                  <i /><button onClick={() => client.jog(0, 1, jogStep)}>▲</button><i />
-                  <button onClick={() => client.jog(-1, 0, jogStep)}>◀</button><i /><button onClick={() => client.jog(1, 0, jogStep)}>▶</button>
-                  <i /><button onClick={() => client.jog(0, -1, jogStep)}>▼</button><i />
+                  <i /><button title={`Jog Y positive by ${jogStep} mm.`} aria-label="Jog Y positive" onClick={() => client.jog(0, 1, jogStep)}>▲</button><i />
+                  <button title={`Jog X negative by ${jogStep} mm.`} aria-label="Jog X negative" onClick={() => client.jog(-1, 0, jogStep)}>◀</button><i /><button title={`Jog X positive by ${jogStep} mm.`} aria-label="Jog X positive" onClick={() => client.jog(1, 0, jogStep)}>▶</button>
+                  <i /><button title={`Jog Y negative by ${jogStep} mm.`} aria-label="Jog Y negative" onClick={() => client.jog(0, -1, jogStep)}>▼</button><i />
                 </div>
                 <span>Ring</span>
                 <div className="jog-pad">
-                  <button onClick={() => jogRing('ccw')}>↺</button><button onClick={() => jogRing('out')}>Out</button><button onClick={() => jogRing('cw')}>↻</button>
-                  <i /><button onClick={() => jogRing('in')}>In</button><i />
+                  <button title="Jog counterclockwise along the ring." aria-label="Jog ring counterclockwise" onClick={() => jogRing('ccw')}>↺</button><button title="Jog outward from the ring center." onClick={() => jogRing('out')}>Out</button><button title="Jog clockwise along the ring." aria-label="Jog ring clockwise" onClick={() => jogRing('cw')}>↻</button>
+                  <i /><button title="Jog inward toward the ring center." onClick={() => jogRing('in')}>In</button><i />
                 </div>
               </div>
             </div>
             <div className="inline-actions calibration-files">
-              <button onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export calibration</button>
-              <label className="file-button">Import<input type="file" accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
-              <button className="danger" onClick={() => {
+              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export calibration</button>
+              <label className="file-button" title="Load nail positions from a JSON calibration file.">Import<input type="file" title="Choose a JSON file containing saved nail measurements." accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
+              <button className="danger" title="Delete all saved nail measurements." onClick={() => {
                 if (!window.confirm('Delete all recorded nail positions?')) return
                 setMeasurements({})
                 notify('Cleared calibration measurements.')
@@ -967,7 +975,7 @@ function App() {
           <div className="appearance-settings">
             <label>
               <span>Appearance</span>
-              <select value={theme} onChange={event => setTheme(event.target.value as ThemePreference)}>
+              <select title="Choose a light or dark appearance, or follow your operating system setting." value={theme} onChange={event => setTheme(event.target.value as ThemePreference)}>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
                 <option value="system">System</option>
@@ -984,13 +992,14 @@ function App() {
                 setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
               }}
             >
-              <summary>{group.title}</summary>
+              <summary title={`Show or hide ${group.title.toLowerCase()} settings.`}>{group.title}</summary>
               <div className="field-grid">
                 {group.fields.map(field => (
                   <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
                     <span>{field.label}</span>
                     <input
                       type={field.check ? 'checkbox' : 'number'}
+                      title={field.title}
                       step={field.check ? undefined : 'any'}
                       min={field.key === 'n' ? 3 : undefined}
                       value={field.check ? undefined : Number(raw[field.key])}
@@ -1001,14 +1010,14 @@ function App() {
                 ))}
               </div>
               {group.kind === 'loop' && (
-                <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...autoLoop(prepare(raw)) })}>
+                <button className="subtle-button" title="Calculate loop depths and widths from the current nail and needle geometry." onClick={() => applyRaw({ ...raw, ...autoLoop(prepare(raw)) })}>
                   Set loop values automatically
                 </button>
               )}
               {group.kind === 'contact' && (
                 <div className="inline-actions">
-                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactOuter(plan.p) })}>Contact = cap rim</button>
-                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactInner(plan.p) })}>Contact = inner shaft</button>
+                  <button className="subtle-button" title="Set the contact offset for the needle touching the outside edge of the nail cap." onClick={() => applyRaw({ ...raw, ...contactOuter(plan.p) })}>Contact = cap rim</button>
+                  <button className="subtle-button" title="Set the contact offset for the needle touching the inner side of the nail shaft." onClick={() => applyRaw({ ...raw, ...contactInner(plan.p) })}>Contact = inner shaft</button>
                 </div>
               )}
             </details>
@@ -1027,22 +1036,22 @@ function App() {
                 <h3>Nail sequence</h3>
                 <p>Load or edit the nail visit order used to generate this job.</p>
               </div>
-              <label className="file-button">Load sequence<input type="file" accept=".txt,.csv,.nc,.gcode" onChange={event => handleSequenceFile(event.target.files?.[0])} /></label>
+              <label className="file-button" title="Load a nail visit sequence from a text or G-code file.">Load sequence<input type="file" title="Choose a text, CSV, NC, or G-code file containing the nail visit sequence." accept=".txt,.csv,.nc,.gcode" onChange={event => handleSequenceFile(event.target.files?.[0])} /></label>
             </div>
             <div className="inline-actions">
               <button onClick={() => {
                 setFileName('demo')
                 setSequence(Array.from({ length: 90 }, (_, k) => (k * 37) % raw.n + raw.ib).join('\n'))
-              }}>Generate demo</button>
+              }} title="Replace the current sequence with a sample string-art pattern.">Generate demo</button>
               <button onClick={() => {
                 const values = [...Array.from({ length: Math.max(1, raw.n | 0) }, (_, k) => raw.ib + k), ...Array.from({ length: Math.max(0, (raw.n | 0) - 1) }, (_, k) => raw.ib + raw.n - 2 - k)]
                 setFileName('calibration')
                 setSequence(values.join('\n'))
                 notify(`Calibration sequence: ${values.length} visits (${raw.n} nails there and back).`)
-              }}>Calibration pattern</button>
+              }} title="Create a sequence that visits every nail in order, then returns across the ring.">Calibration pattern</button>
               <span className="sequence-count">{sequence.split(/[\s,;]+/).filter(Boolean).length} entries</span>
             </div>
-            <textarea aria-label="Nail sequence" value={sequence} onChange={event => setSequence(event.target.value)} />
+            <textarea aria-label="Nail sequence" title="Edit the nail visit order. Separate nail numbers with spaces, commas, semicolons, or new lines." value={sequence} onChange={event => setSequence(event.target.value)} />
             <p className="hint">Enter nail numbers separated by spaces, commas, or new lines. Invalid nail numbers are skipped.</p>
           </section>
           <section className="dialog-section file-job-section" hidden={activeDialog !== 'gcode'}>
@@ -1056,31 +1065,31 @@ function App() {
               </span>
             </div>
             <div className="machine-actions">
-              <button onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
-              <button onClick={() => void copyGcode()}>Copy G-code</button>
-              <button className="primary" disabled={!connected || acting || client.running || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
-              {runPaused && <button className="primary" onClick={() => { client.resumeRun(); setRunPaused(false) }}>Thread attached: Resume</button>}
-              <label className="board-name">Board job<input value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
-              <button className="primary" disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>⬆ Upload to SD</button>
-              <button className="primary" disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
-              {connected && machineStatus.sd != null && /^Hold/.test(machineStatus.state) && <button className="primary" onClick={() => client.resumeHold()}>Resume SD job</button>}
+              <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
+              <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
+              <button className="primary" title="Stream this job directly to the connected FluidNC controller." disabled={!connected || acting || client.running || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
+              {runPaused && <button className="primary" title="Resume the paused run after attaching the thread." onClick={() => { client.resumeRun(); setRunPaused(false) }}>Thread attached: Resume</button>}
+              <label className="board-name">Board job<input title="Base filename to use when saving or uploading this job." value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
+              <button className="primary" title="Upload the generated G-code to the controller's SD card." disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>⬆ Upload to SD</button>
+              <button className="primary" title="Start the selected uploaded job on the controller." disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
+              {connected && machineStatus.sd != null && /^Hold/.test(machineStatus.state) && <button className="primary" title="Resume the SD-card job after attaching the thread." onClick={() => client.resumeHold()}>Resume SD job</button>}
             </div>
             {(runMessage || uploadInfo) && <p className="machine-message">{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}{uploadInfo ? ` ${uploadInfo}` : ''}</p>}
             {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
             {uploading && <p className="hint">Uploading… {uploadSeconds}s</p>}
             <details className="gcode-details">
-              <summary>G-code text</summary>
-              <textarea readOnly value={gcode} />
+              <summary title="Expand to inspect the generated G-code.">G-code text</summary>
+              <textarea readOnly title="Generated G-code for the current toolpath. This preview is read-only." value={gcode} />
             </details>
           </section>
           <section className="dialog-section board-files-section" hidden={activeDialog !== 'boardFiles'}>
             <div className="dialog-section-heading">
               <div><h3>FluidNC files</h3><p>Browse files stored on the controller.</p></div>
-              <button onClick={() => void refreshFiles()}>Refresh</button>
+              <button title={`Refresh the ${filesKind === 'SD' ? 'SD card' : 'controller flash'} file list.`} onClick={() => void refreshFiles()}>Refresh</button>
             </div>
             <div className="files-toolbar">
-              <button className={filesKind === 'SD' ? 'selected' : ''} onClick={() => { setFilesKind('SD'); setFiles([]); void refreshFiles('SD') }}>SD card</button>
-              <button className={filesKind === 'LocalFS' ? 'selected' : ''} onClick={() => { setFilesKind('LocalFS'); setFiles([]); void refreshFiles('LocalFS') }}>Flash</button>
+              <button title="Browse files stored on the controller's SD card." className={filesKind === 'SD' ? 'selected' : ''} onClick={() => { setFilesKind('SD'); setFiles([]); void refreshFiles('SD') }}>SD card</button>
+              <button title="Browse controller flash files. These files are read-only." className={filesKind === 'LocalFS' ? 'selected' : ''} onClick={() => { setFilesKind('LocalFS'); setFiles([]); void refreshFiles('LocalFS') }}>Flash</button>
             </div>
             <p className="hint">{filesInfo}</p>
             <div className="file-list">
@@ -1093,8 +1102,8 @@ function App() {
                     <small>{formatBytes(file.size)}</small>
                     {current && filesKind === 'SD' && <small>{matches ? '✓ plan' : '≠ plan'}</small>}
                     {filesKind === 'SD' && <>
-                      <button onClick={() => void runListedFile(file)}>Run</button>
-                      <button className="danger" onClick={() => void deleteBoardFile(file)}>Delete</button>
+                      <button title={`Run ${boardPath(file.name)} from the SD card.`} onClick={() => void runListedFile(file)}>Run</button>
+                      <button className="danger" title={`Delete ${boardPath(file.name)} from the SD card.`} onClick={() => void deleteBoardFile(file)}>Delete</button>
                     </>}
                   </div>
                 )
@@ -1123,13 +1132,14 @@ function App() {
                   setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
                 }}
               >
-                <summary>{group.title}</summary>
+                <summary title={`Show or hide ${group.title.toLowerCase()} settings.`}>{group.title}</summary>
                 <div className="field-grid">
                   {group.fields.map(field => (
                     <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
                       <span>{field.label}</span>
                       <input
                         type={field.check ? 'checkbox' : 'number'}
+                        title={field.title}
                         step={field.check ? undefined : 'any'}
                         min={field.key === 'n' ? 3 : undefined}
                         value={field.check ? undefined : Number(raw[field.key])}
@@ -1153,11 +1163,12 @@ function App() {
                 <div className="anchor-row" key={index}>
                   <span>{index + 1}</span>
                   {(['nail', 'x', 'y'] as const).map(key => (
-                    <input key={key} type="number" step="any" value={anchor[key]} aria-label={`Anchor ${index + 1} ${key}`} onChange={event => updateAnchor(index, key, Number(event.target.value))} />
+                    <input key={key} type="number" step="any" value={anchor[key]} aria-label={`Anchor ${index + 1} ${key}`} title={key === 'nail' ? `Nail number associated with calibration anchor ${index + 1}.` : `Measured ${key.toUpperCase()} machine coordinate for calibration anchor ${index + 1}, in millimeters.`} onChange={event => updateAnchor(index, key, Number(event.target.value))} />
                   ))}
                   <button
                     className={pickedAnchor === index ? 'selected' : ''}
                     aria-label={`Set anchor ${index + 1} from map`}
+                    title={`Pick anchor ${index + 1} by clicking its location on the toolpath map.`}
                     onClick={() => {
                       setPickedAnchor(index)
                       setAnchorPickMode(true)
@@ -1169,11 +1180,11 @@ function App() {
               ))}
             </div>
             <div className="inline-actions">
-              <button onClick={resetAnchors}>Reset anchors to ideal</button>
-              <button onClick={fitRadiusToAnchors}>Set nail radius from anchors</button>
-              <button onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export measurements</button>
-              <label className="file-button">Import measurements<input type="file" accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
-              <button className="danger" onClick={() => {
+              <button title="Move the three anchors back to their calculated ideal locations." onClick={resetAnchors}>Reset anchors to ideal</button>
+              <button title="Calculate and apply the nail axis radius from the measured anchor circle." onClick={fitRadiusToAnchors}>Set nail radius from anchors</button>
+              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export measurements</button>
+              <label className="file-button" title="Load nail positions from a JSON calibration file.">Import measurements<input type="file" title="Choose a JSON file containing saved nail measurements." accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
+              <button className="danger" title="Delete all saved nail measurements." onClick={() => {
                 if (!window.confirm('Delete all recorded nail positions?')) return
                 setMeasurements({})
                 notify('Cleared calibration measurements.')
@@ -1186,10 +1197,34 @@ function App() {
           </section>
         </div>
       </AppDialog>
+      <AppDialog open={activeDialog === 'help'} title="Keyboard shortcuts and notes" onClose={() => setActiveDialog(null)}>
+        <div className="help-dialog-content">
+          <p>Use these shortcuts when the focus is not in a text or number field.</p>
+          <table>
+            <tbody>
+              <tr><th><kbd>Enter</kbd></th><td>Move to the selected nail, then record its measurement.</td></tr>
+              <tr><th><kbd>←</kbd> <kbd>↑</kbd> <kbd>↓</kbd> <kbd>→</kbd></th><td>Jog the machine in X and Y.</td></tr>
+              <tr><th><kbd>W</kbd> <kbd>S</kbd></th><td>Jog outward or inward along the ring.</td></tr>
+              <tr><th><kbd>A</kbd> <kbd>D</kbd></th><td>Jog counterclockwise or clockwise along the ring.</td></tr>
+              <tr><th><kbd>Shift</kbd></th><td>Multiply keyboard jog distance by 10.</td></tr>
+              <tr><th><kbd>[</kbd> <kbd>]</kbd></th><td>Select a smaller or larger jog increment.</td></tr>
+              <tr><th><kbd>Esc</kbd></th><td>Close an open menu or dialog; otherwise stop machine motion.</td></tr>
+            </tbody>
+          </table>
+          <h3>Map controls</h3>
+          <ul>
+            <li>Drag to pan; use the mouse wheel to zoom around the pointer.</li>
+            <li>Double-click the map or select <b>Fit view</b> to fit the machine bed.</li>
+            <li>When placing an anchor, click the map to set its position.</li>
+            <li>Green marks show calibration anchors and measured nail offsets.</li>
+          </ul>
+          <p className="hint">Only use machine controls when the bed is clear and the machine is safe to move.</p>
+        </div>
+      </AppDialog>
       <footer className={`toast ${error ? 'error' : ''}`} aria-live="polite">
         <span>{message || (connected ? 'FluidNC connected' : 'Ready · Connect to FluidNC to control the machine')}</span>
         <span className="statusbar-detail">{plan.visits} visits <b>·</b> XY only</span>
-        {anchorPickMode && <button onClick={() => { setAnchorPickMode(false); setPickedAnchor(null) }}>Cancel map pick</button>}
+        {anchorPickMode && <button title="Stop placing an anchor on the map." onClick={() => { setAnchorPickMode(false); setPickedAnchor(null) }}>Cancel map pick</button>}
       </footer>
     </div>
   )

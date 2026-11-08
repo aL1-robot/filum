@@ -335,6 +335,9 @@ export default function PlannerCanvas(props: Props) {
           ref={canvasRef}
           className="main-canvas"
           aria-label="Machine bed and generated thread path"
+          title={props.pickingAnchor
+            ? 'Click to place the selected calibration anchor. Drag to pan; use the mouse wheel to zoom.'
+            : 'Drag to pan, use the mouse wheel to zoom, and double-click to fit the machine bed.'}
           onClick={handleClick}
           onDoubleClick={fit}
           onWheel={event => {
@@ -366,7 +369,7 @@ export default function PlannerCanvas(props: Props) {
         {props.pickingAnchor && <span className="canvas-instruction">Click the board to place the selected anchor</span>}
       </div>
       <div className="local-view">
-        <canvas ref={localCanvasRef} aria-label="Nail footprint and loop clearance" />
+        <canvas ref={localCanvasRef} aria-label="Nail footprint and loop clearance" title="Local view of the nail footprint, neighboring nails, and loop paths." />
         <div className="local-notes">
           <div className="local-legend">
             <span className="ccw">CCW wrap</span>

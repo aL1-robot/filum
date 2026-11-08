@@ -2565,6 +2565,73 @@ button.danger {
   color: var(--success);
 }
 
+.help-dialog-content {
+  display: grid;
+  gap: 12px;
+  color: var(--heading);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.help-dialog-content > p,
+.help-dialog-content h3 {
+  margin: 0;
+}
+
+.help-dialog-content h3 {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.help-dialog-content table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.help-dialog-content th,
+.help-dialog-content td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.help-dialog-content th {
+  width: 190px;
+  color: var(--heading);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.help-dialog-content td {
+  color: var(--muted);
+}
+
+.help-dialog-content kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--heading);
+  font: 11px var(--mono);
+}
+
+.help-dialog-content ul {
+  display: grid;
+  gap: 5px;
+  margin: -5px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.help-dialog-content .hint {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 1180px) and (min-width: 761px) {
   .app-shell {
     height: auto;
@@ -2594,6 +2661,10 @@ button.danger {
   .planner-panel > .canvas-layout {
     flex: 0 0 auto;
     grid-template-rows: minmax(350px, 52vh) 76px;
+  }
+
+  .help-dialog-content th {
+    width: 150px;
   }
 }
 
