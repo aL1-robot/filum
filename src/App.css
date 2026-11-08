@@ -3474,6 +3474,8 @@ select {
   }
 }
 
+
+
 @media (pointer: coarse) {
   button,
   input:not([type='checkbox']):not([type='range']),
@@ -4862,5 +4864,82 @@ button.danger {
 
   .preview-sidebar-content .local-summary .local-view canvas {
     height: 160px;
+  }
+}
+
+.app-shell {
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
+.confirmation-message {
+  white-space: pre-line;
+}
+
+.confirmation-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.network-spike {
+  display: grid;
+  gap: 12px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.network-spike h1,
+.network-spike p {
+  margin: 0;
+}
+
+.network-spike label {
+  display: grid;
+  gap: 6px;
+}
+
+.network-spike input {
+  min-height: 44px;
+}
+
+.network-spike pre {
+  min-height: 180px;
+  max-height: 55vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .keyboard-hint {
+    display: none;
+  }
+
+  button,
+  .file-button,
+  [role='menuitem'],
+  .field-group summary,
+  .board-files > summary,
+  .gcode-details > summary,
+  input:not([type='checkbox']):not([type='range']),
+  select {
+    min-height: 44px;
+  }
+
+  .jog-pad button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  input[type='range'] {
+    min-height: 44px;
   }
 }
