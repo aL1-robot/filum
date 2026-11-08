@@ -28,7 +28,7 @@ export type FluidEvent =
   | { type: 'disconnected' }
   | { type: 'machine-error'; text: string }
   | { type: 'run-progress'; done: number; total: number }
-  | { type: 'run-paused' }
+  | { type: 'run-paused'; reason: 'thread-attachment' | 'user' }
   | { type: 'run-resumed' }
 
 type QueueItem = { line: string; resolve: (ok: boolean) => void }
@@ -246,6 +246,10 @@ export class FluidNC {
     }, 200)
   }
 
+  pauseMotion() {
+    if (this.connected) this.ws?.send('!')
+  }
+
   unlock(): Promise<boolean> {
     return this.send('$X')
   }
@@ -357,7 +361,7 @@ export class FluidNC {
     await this.settle()
     if (!this.run) return { ok: false, reason: this.abortReason || 'Run aborted' }
     this.run.paused = true
-    this.emit({ type: 'run-paused' })
+    this.emit({ type: 'run-paused', reason: 'thread-attachment' })
     const goOn = await new Promise<boolean>(resolve => {
       if (this.run) this.run.resolvePause = resolve
       else resolve(false)
@@ -376,10 +380,19 @@ export class FluidNC {
 
   resumeRun() {
     const run = this.run
-    if (!run?.resolvePause) return
-    const resolve = run.resolvePause
-    run.resolvePause = null
-    resolve(true)
+    if (!run) return
+    if (run.resolvePause) {
+      const resolve = run.resolvePause
+      run.resolvePause = null
+      resolve(true)
+      return
+    }
+    if (!run.paused) return
+    run.paused = false
+    this.resumeHold()
+    this.emit({ type: 'run-resumed' })
+    this.pumpRun()
+    this.finishRunSegmentIfReady(run)
   }
 
   private emit(event: FluidEvent) {
@@ -574,10 +587,22 @@ export class FluidNC {
     if (run.done % 40 === 0 || run.done === run.total) {
       this.emit({ type: 'run-progress', done: run.done, total: run.total })
     }
-    if (run.index >= run.lines.length && run.flight <= 0) {
-      const resolve = run.resolveSeg
-      run.resolveSeg = null
-      resolve(true)
-    } else this.pumpRun()
+    this.finishRunSegmentIfReady(run)
+    this.pumpRun()
+  }
+
+  pauseRun() {
+    const run = this.run
+    if (!run || run.paused || !this.connected) return
+    run.paused = true
+    this.pauseMotion()
+    this.emit({ type: 'run-paused', reason: 'user' })
+  }
+
+  private finishRunSegmentIfReady(run: RunState) {
+    if (this.run !== run || run.paused || run.index < run.lines.length || run.flight > 0) return
+    const resolve = run.resolveSeg
+    run.resolveSeg = null
+    resolve?.(true)
   }
 }

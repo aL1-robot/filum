@@ -156,6 +156,7 @@ function App() {
   const [error, setError] = useState(false)
   const [runMessage, setRunMessage] = useState('')
   const [runPaused, setRunPaused] = useState(false)
+  const [runWaitingForThread, setRunWaitingForThread] = useState(false)
   const [runDone, setRunDone] = useState(0)
   const [runTotal, setRunTotal] = useState(0)
   const [address, setAddress] = useState('http://192.168.1.32/')
@@ -216,6 +217,10 @@ function App() {
   const measuredCount = Object.keys(plan.residuals).length
   const connected = machineStatus.connected
   const busyWithBoard = client.sdBusy() || uploading
+  const boardJobActive = connected && machineStatus.sd != null
+  const boardJobPaused = boardJobActive && /^Hold/.test(machineStatus.state)
+  const canPauseJob = connected && ((client.running && !runPaused) || (boardJobActive && !boardJobPaused))
+  const canResumeJob = connected && (runPaused || boardJobPaused)
   const anchorIndexes = anchors.map(anchor => anchor.nail - plan.p.ib)
   const allAnchorsMeasured = anchorIndexes.every(index => measurements[index] != null)
 
@@ -228,9 +233,11 @@ function App() {
         setRunMessage(`Running: ${event.done} / ${event.total} lines acknowledged`)
       } else if (event.type === 'run-paused') {
         setRunPaused(true)
-        setRunMessage('Waiting for thread')
+        setRunWaitingForThread(event.reason === 'thread-attachment')
+        setRunMessage(event.reason === 'thread-attachment' ? 'Waiting for thread attachment' : 'Job paused')
       } else if (event.type === 'run-resumed') {
         setRunPaused(false)
+        setRunWaitingForThread(false)
       } else if (event.type === 'machine-error') {
         setMessage(event.text)
         setError(true)
@@ -536,9 +543,12 @@ function App() {
     setRunMessage('Moving to the first nail...')
     setRunDone(0)
     setRunPaused(false)
+    setRunWaitingForThread(false)
     setActing(true)
     const result = await client.runGcode(split.approach, split.rest)
     setActing(false)
+    setRunPaused(false)
+    setRunWaitingForThread(false)
     if (result.ok) {
       setProgress(current => finishProgress(current))
       setRunMessage(`Done: ${result.lines} lines run. Needle is back at home.`)
@@ -724,10 +734,21 @@ function App() {
   function stopMachine() {
     client.stop()
     setRunPaused(false)
+    setRunWaitingForThread(false)
     setArrived(false)
     setActing(false)
     setProgress(current => haltProgress(current))
     notify('Stopped (feed hold + reset). Check position, then Unlock if needed.', true)
+  }
+
+  function pauseJob() {
+    if (client.running) client.pauseRun()
+    else client.pauseMotion()
+  }
+
+  function resumeJob() {
+    if (client.running) client.resumeRun()
+    else client.resumeHold()
   }
 
   function resetAnchors() {
@@ -970,6 +991,36 @@ function App() {
 
         </aside>
       </main>
+      <footer className="jobbar" aria-label="Job controls">
+        <div className="job-transport">
+          <button className="primary" title="Stream the generated toolpath directly to FluidNC. The machine must be connected and homed." disabled={!connected || acting || client.running || busyWithBoard || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
+          <button title="Pause the active FluidNC job with feed hold." disabled={!canPauseJob} onClick={pauseJob}>Ⅱ Pause job</button>
+          <button className="primary" title={runWaitingForThread ? 'Attach the thread at the first nail, then continue the streamed toolpath.' : 'Resume the paused or held job on FluidNC.'} disabled={!canResumeJob} onClick={resumeJob}>{runWaitingForThread ? 'Thread attached: Resume' : '▶ Resume job'}</button>
+          <button className="danger" title="Stop motion and reset the controller." disabled={!connected} onClick={stopMachine}>■ Stop</button>
+        </div>
+        <details className="job-tools">
+          <summary title="Show save, copy, upload, and SD-card job actions.">File &amp; SD tools</summary>
+          <div className="job-tool-groups">
+            <div className="job-group">
+              <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
+              <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
+            </div>
+            <div className="job-group">
+              <label className="board-name">Board job<input title="Base filename to use when saving or uploading this job." value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
+              <button className="primary" title="Upload the generated G-code to the controller's SD card." disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>{uploading ? 'Uploading…' : '⬆ Upload to SD'}</button>
+              <button className="primary" title="Start the selected uploaded job on the controller." disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
+            </div>
+          </div>
+        </details>
+        {(runMessage || uploadInfo || uploading) && (
+          <div className="job-progress" role="status" aria-live="polite">
+            {runMessage && <span>{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}</span>}
+            {uploadInfo && <span>{uploadInfo}</span>}
+            {uploading && <span>Uploading… {uploadSeconds}s</span>}
+            {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
+          </div>
+        )}
+      </footer>
       <AppDialog open={activeDialog === 'settings'} title="Planner settings" onClose={() => setActiveDialog(null)}>
         <div className="settings-dialog-content">
           <div className="appearance-settings">
@@ -1065,18 +1116,8 @@ function App() {
               </span>
             </div>
             <div className="machine-actions">
-              <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
-              <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
-              <button className="primary" title="Stream this job directly to the connected FluidNC controller." disabled={!connected || acting || client.running || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
-              {runPaused && <button className="primary" title="Resume the paused run after attaching the thread." onClick={() => { client.resumeRun(); setRunPaused(false) }}>Thread attached: Resume</button>}
-              <label className="board-name">Board job<input title="Base filename to use when saving or uploading this job." value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
-              <button className="primary" title="Upload the generated G-code to the controller's SD card." disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>⬆ Upload to SD</button>
-              <button className="primary" title="Start the selected uploaded job on the controller." disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
-              {connected && machineStatus.sd != null && /^Hold/.test(machineStatus.state) && <button className="primary" title="Resume the SD-card job after attaching the thread." onClick={() => client.resumeHold()}>Resume SD job</button>}
+              <p className="hint">Use the persistent job controls at the bottom of the window to start, pause, resume, stop, or transfer this job.</p>
             </div>
-            {(runMessage || uploadInfo) && <p className="machine-message">{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}{uploadInfo ? ` ${uploadInfo}` : ''}</p>}
-            {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
-            {uploading && <p className="hint">Uploading… {uploadSeconds}s</p>}
             <details className="gcode-details">
               <summary title="Expand to inspect the generated G-code.">G-code text</summary>
               <textarea readOnly title="Generated G-code for the current toolpath. This preview is read-only." value={gcode} />

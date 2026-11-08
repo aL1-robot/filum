@@ -2769,3 +2769,228 @@ button.danger {
     min-height: 32px;
   }
 }
+
+/* Keep the planner in a fixed desktop workspace with a persistent job bar. */
+@media (min-width: 761px) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace {
+    flex: 1 1 0;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) clamp(270px, 28vw, 380px);
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .planner-column {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    padding: 10px 12px 8px 14px;
+  }
+
+  .control-column {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+
+  .jobbar {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    min-width: 0;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--chrome);
+    color: var(--chrome-text);
+  }
+
+  .job-transport,
+  .job-group,
+  .job-tool-groups {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .job-transport .primary {
+    min-width: 142px;
+    min-height: 34px;
+  }
+
+  .job-transport button {
+    min-height: 32px;
+  }
+
+  .job-tools {
+    display: contents;
+  }
+
+  .job-tools > summary {
+    display: none;
+  }
+
+  .job-tool-groups {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .job-group + .job-group {
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
+  }
+
+  .jobbar .board-name {
+    color: var(--chrome-muted);
+  }
+
+  .jobbar .board-name input {
+    width: 120px;
+    min-height: 30px;
+  }
+
+  .job-progress {
+    display: grid;
+    flex: 1 0 100%;
+    gap: 3px;
+    color: var(--chrome-muted);
+    font-size: 10px;
+  }
+
+  .job-progress:empty {
+    display: none;
+  }
+
+  .job-progress .progress-track {
+    margin-top: 0;
+  }
+
+  .toast {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    min-height: 30px;
+    padding: 4px 12px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--chrome);
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) clamp(260px, 31vw, 320px);
+  }
+
+  .planner-column {
+    padding-inline: 9px;
+  }
+
+  .jobbar {
+    gap: 6px 8px;
+    padding-inline: 8px;
+  }
+
+  .job-transport,
+  .job-tool-groups {
+    gap: 4px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .workspace {
+    flex: 1 0 auto;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .jobbar {
+    position: sticky;
+    bottom: 32px;
+    z-index: 3;
+    display: grid;
+    gap: 6px;
+    padding: 7px 8px;
+    border-top: 1px solid var(--border);
+    background: var(--chrome);
+    box-shadow: 0 -3px 12px rgb(20 20 25 / 12%);
+  }
+
+  .job-transport {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .job-transport button {
+    min-width: 0;
+    min-height: 36px;
+    padding-inline: 4px;
+    white-space: normal;
+  }
+
+  .job-tools > summary {
+    padding: 4px 0;
+    color: var(--chrome-muted);
+    cursor: pointer;
+    font-size: 11px;
+  }
+
+  .job-tool-groups {
+    display: grid;
+    gap: 6px;
+    padding-top: 6px;
+  }
+
+  .job-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .job-group + .job-group {
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+
+  .job-progress {
+    display: grid;
+    gap: 3px;
+    color: var(--chrome-muted);
+    font-size: 10px;
+  }
+
+  .job-progress:empty {
+    display: none;
+  }
+
+  .job-progress .progress-track {
+    margin-top: 0;
+  }
+}
