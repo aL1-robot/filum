@@ -4672,6 +4672,24 @@ button.danger {
 }
 
 @media (max-width: 760px) {
+  .app-brand {
+    order: 1;
+  }
+
+  .connection-pill {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .top-stop-button {
+    order: 3;
+  }
+
+  .hamburger-button {
+    order: 4;
+    margin-left: 0;
+  }
+
   .jobbar {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
