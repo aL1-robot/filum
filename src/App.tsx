@@ -39,7 +39,10 @@ const THEME_STORAGE_KEY = 'filum-theme'
 type ThemePreference = 'system' | 'light' | 'dark'
 type AppMenu = 'file' | 'settings' | 'help'
 type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help'
-type AppMenuItem = { label: string; dialog: AppDialogView; title?: string }
+type AppMenuItem = { label: string; title?: string } & (
+  | { dialog: AppDialogView; action?: never }
+  | { action: 'open-sequence'; dialog?: never }
+)
 type AppMenuGroup = { label: string; items: AppMenuItem[] }
 
 function storedThemePreference(): ThemePreference {
@@ -64,6 +67,7 @@ const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
   ],
   file: [
     { label: 'Project', items: [
+      { label: 'Open sequence…', action: 'open-sequence', title: 'Choose a sequence file to load into the planner.' },
       { label: 'Nail sequence', dialog: 'sequence' },
       { label: 'G-code job', dialog: 'gcode' },
     ] },
@@ -78,13 +82,25 @@ const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
 
 const APP_MENUS: AppMenu[] = ['file', 'settings', 'help']
 
-function renderMenuItems(menu: AppMenu, onSelect: (dialog: AppDialogView) => void) {
+function renderMenuItems(
+  menu: AppMenu,
+  onSelect: (dialog: AppDialogView) => void,
+  onOpenSequence: () => void,
+) {
   return APP_MENU_GROUPS[menu].map((group, groupIndex) => (
     <div className="menu-group" key={group.label}>
       {groupIndex > 0 && <div className="menu-separator" role="separator" />}
       <div className="menu-group-label">{group.label}</div>
       {group.items.map(item => (
-        <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => onSelect(item.dialog)}>{item.label}</button>
+        <button
+          role="menuitem"
+          key={item.dialog ?? item.action}
+          title={item.title ?? `Open ${item.label.toLowerCase()}.`}
+          onClick={() => {
+            if ('action' in item && item.action === 'open-sequence') onOpenSequence()
+            else if ('dialog' in item) onSelect(item.dialog)
+          }}
+        >{item.label}</button>
       ))}
     </div>
   ))
@@ -385,6 +401,14 @@ function App() {
       setFilesOpen(true)
       void refreshFiles()
     }
+  }
+
+  function openSequencePicker() {
+    setActivePopup(null)
+    setMobileMenuOpen(false)
+    const picker = document.getElementById('sequence-file-input')
+    if (!(picker instanceof HTMLInputElement)) throw new Error('Sequence file picker is not available.')
+    picker.click()
   }
 
   function updateRaw(key: keyof RawParams, value: number | boolean) {
@@ -821,7 +845,7 @@ function App() {
               >{menu[0].toUpperCase() + menu.slice(1)}</button>
               {activePopup === menu && (
                 <div className="menu-popup" role="menu">
-                  {renderMenuItems(menu, openDialog)}
+                  {renderMenuItems(menu, openDialog, openSequencePicker)}
                 </div>
               )}
             </div>
@@ -839,7 +863,6 @@ function App() {
         >
           <span /><span /><span />
         </button>
-        <div className="header-context">Planner <span>/</span> Toolpath</div>
         <span className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}.` : 'Not connected to FluidNC.'}>
           <i />
           {connected ? machineStatus.state : 'Not connected'}
@@ -880,12 +903,24 @@ function App() {
                   <span>{menu[0].toUpperCase() + menu.slice(1)}</span>
                   <span className="mobile-menu-chevron" aria-hidden="true">{activePopup === menu ? '▴' : '▾'}</span>
                 </button>
-                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog)}</div>}
+                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog, openSequencePicker)}</div>}
               </section>
             ))}
           </nav>
         </div>
       )}
+      <input
+        id="sequence-file-input"
+        className="sr-only"
+        type="file"
+        aria-label="Open sequence file"
+        title="Choose a text, CSV, NC, or G-code file containing the nail visit sequence."
+        accept=".txt,.csv,.nc,.gcode"
+        onChange={event => {
+          handleSequenceFile(event.currentTarget.files?.[0])
+          event.currentTarget.value = ''
+        }}
+      />
 
       <main className="workspace" onClick={() => setActivePopup(null)}>
         <section className="planner-column">
@@ -1121,7 +1156,7 @@ function App() {
                 <h3>Nail sequence</h3>
                 <p>Load or edit the nail visit order used to generate this job.</p>
               </div>
-              <label className="file-button" title="Load a nail visit sequence from a text or G-code file.">Load sequence<input type="file" title="Choose a text, CSV, NC, or G-code file containing the nail visit sequence." accept=".txt,.csv,.nc,.gcode" onChange={event => handleSequenceFile(event.target.files?.[0])} /></label>
+              <button title="Load a nail visit sequence from a text or G-code file." onClick={openSequencePicker}>Load sequence</button>
             </div>
             <div className="inline-actions">
               <button onClick={() => {
