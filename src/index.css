@@ -4,14 +4,18 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #24212b;
-  background: #f7f6f9;
-  --surface: #fff;
+  color: #25242a;
+  background: #e7e8eb;
+  --surface: #f7f7f8;
+  --panel: #f0f1f3;
+  --chrome: #27272d;
+  --chrome-text: #f3f3f5;
+  --chrome-muted: #a7a7b0;
   --heading: #24212b;
-  --muted: #76717e;
-  --border: #e4e1e9;
-  --accent: #9c3cec;
-  --accent-soft: #f7eeff;
+  --muted: #6d6d77;
+  --border: #d7d8dd;
+  --accent: #7444c8;
+  --accent-soft: #ece7f6;
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
@@ -30,6 +34,29 @@ input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 .main-canvas:focus-visible {
-  outline: 2px solid #9c3cec;
+  outline: 2px solid #7444c8;
   outline-offset: 2px;
+}
+
+button,
+input,
+textarea {
+  accent-color: #7444c8;
+}
+
+::selection {
+  color: #fff;
+  background: #7444c8;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: #c3c4ca;
+  background-clip: padding-box;
 }

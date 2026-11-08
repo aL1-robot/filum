@@ -239,24 +239,6 @@ function drawMain(
   }
 
   ctx.font = '12px system-ui, sans-serif'
-  const legend: [string, string, number[]][] = [
-    [COLORS.path, 'Thread path', []],
-    [COLORS.approach, 'Approach from home', [5, 4]],
-    [COLORS.exit, 'Return to home', [5, 4]],
-  ]
-  legend.forEach(([color, label, dash], index) => {
-    const top = 17 + index * 16
-    ctx.strokeStyle = color
-    ctx.lineWidth = 2
-    ctx.setLineDash(dash)
-    ctx.beginPath()
-    ctx.moveTo(12, top - 4)
-    ctx.lineTo(34, top - 4)
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.fillStyle = COLORS.label
-    ctx.fillText(label, 41, top)
-  })
   ctx.restore()
 }
 
@@ -278,13 +260,6 @@ function drawLocal(canvas: HTMLCanvasElement, plan: Plan) {
   ctx.globalAlpha = 1
   drawPolyline(ctx, plan.ccw.path, x, y, COLORS.path, 2)
   drawPolyline(ctx, plan.cw.path, x, y, COLORS.approach, 2)
-  ctx.fillStyle = COLORS.label
-  ctx.font = '11px system-ui, sans-serif'
-  ctx.fillText('outward →', width - 72, 15)
-  ctx.fillStyle = COLORS.path
-  ctx.fillText('CCW wrap', 8, 15)
-  ctx.fillStyle = COLORS.approach
-  ctx.fillText('CW wrap', 8, 29)
   ctx.restore()
 }
 
@@ -299,9 +274,7 @@ export default function PlannerCanvas(props: Props) {
     const canvas = canvasRef.current
     if (!canvas) return
     const resize = () => {
-      setView(current => current
-        ? { ...current }
-        : fitView(canvas.clientWidth, canvas.clientHeight, props.plan.p.bw, props.plan.p.bh))
+      setView(fitView(canvas.clientWidth, canvas.clientHeight, props.plan.p.bw, props.plan.p.bh))
     }
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
@@ -381,7 +354,14 @@ export default function PlannerCanvas(props: Props) {
       </div>
       <div className="local-view">
         <canvas ref={localCanvasRef} aria-label="Nail footprint and loop clearance" />
-        <p>Local view: one nail footprint, neighboring nails, and both loop directions</p>
+        <div className="local-notes">
+          <div className="local-legend">
+            <span className="ccw">CCW wrap</span>
+            <span className="cw">CW wrap</span>
+            <span>→ outward</span>
+          </div>
+          <p>One nail footprint, neighboring nails, and both loop directions</p>
+        </div>
       </div>
     </div>
   )

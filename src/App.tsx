@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   FIELD_GROUPS,
   approachToNail,
@@ -35,6 +35,74 @@ import './App.css'
 
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 5]
 const INITIAL = startingPoint()
+type AppMenu = 'file' | 'settings' | 'machine'
+type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors'
+
+const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView }[]> = {
+  settings: [{ label: 'Planner settings', dialog: 'settings' }],
+  file: [
+    { label: 'Nail sequence', dialog: 'sequence' },
+    { label: 'G-code job', dialog: 'gcode' },
+    { label: 'Board files', dialog: 'boardFiles' },
+  ],
+  machine: [
+    { label: 'Machine configuration', dialog: 'machineConfig' },
+    { label: 'Calibration anchors', dialog: 'anchors' },
+  ],
+}
+
+function AppDialog({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean
+  title: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (open && !dialog.open) dialog.showModal()
+    if (!open && dialog.open) dialog.close()
+  }, [open])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="app-dialog"
+      aria-labelledby={titleId}
+      onCancel={event => {
+        event.preventDefault()
+        onClose()
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          onClose()
+        }
+      }}
+      onClose={onClose}
+      onClick={event => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <header className="dialog-header">
+        <div>
+          <span className="dialog-eyebrow">NEEDLE PLANNER</span>
+          <h2 id={titleId}>{title}</h2>
+        </div>
+        <button className="dialog-close" aria-label="Close dialog" onClick={onClose}>×</button>
+      </header>
+      <div className="dialog-body">{children}</div>
+    </dialog>
+  )
+}
 
 function downloadText(text: string, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }))
@@ -55,6 +123,9 @@ function App() {
   const [anchors, setAnchors] = useState<Anchor[]>(INITIAL.anchors)
   const [anchorAuto, setAnchorAuto] = useState(true)
   const [fieldGroupsOpen, setFieldGroupsOpen] = useState(() => Object.fromEntries(FIELD_GROUPS.map(group => [group.title, group.open])))
+  const [activePopup, setActivePopup] = useState<AppMenu | null>(null)
+  const [activeDialog, setActiveDialog] = useState<AppDialogView | null>(null)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [pickedAnchor, setPickedAnchor] = useState<number | null>(null)
   const [sequence, setSequence] = useState(INITIAL.sequence)
   const [measurements, setMeasurements] = useState<Measurements>({})
@@ -174,6 +245,13 @@ function App() {
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(target.tagName))) return
       if (event.key === 'Escape') {
+        if (event.defaultPrevented || target instanceof HTMLElement && target.closest('dialog[open]')) return
+        if (activeDialog) return
+        if (activePopup || mobileMenuOpen) {
+          setActivePopup(null)
+          setMobileMenuOpen(false)
+          return
+        }
         if (client.connected) client.stop()
         setArrived(false)
         setActing(false)
@@ -211,11 +289,25 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [client, currentNail, jogStep])
+  }, [client, currentNail, jogStep, activePopup, activeDialog, mobileMenuOpen])
 
   function notify(text: string, bad = false) {
     setMessage(text)
     setError(bad)
+  }
+
+  function toggleMenu(menu: AppMenu) {
+    setActivePopup(current => current === menu ? null : menu)
+  }
+
+  function openDialog(dialog: AppDialogView) {
+    setActiveDialog(dialog)
+    setActivePopup(null)
+    setMobileMenuOpen(false)
+    if (dialog === 'boardFiles') {
+      setFilesOpen(true)
+      void refreshFiles()
+    }
   }
 
   function updateRaw(key: keyof RawParams, value: number | boolean) {
@@ -615,114 +707,98 @@ function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div>
-          <h1>Needle path planner</h1>
-          <p>Leaning nails · vertical needle · XY only</p>
+        <div className="app-brand">
+          <div className="app-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <circle cx="16" cy="16" r="10.5" />
+              <path d="M8.5 9.5 23 22M8 16h16M16 5.5v21" />
+              <circle cx="8.5" cy="9.5" r="1.5" />
+              <circle cx="23" cy="22" r="1.5" />
+            </svg>
+          </div>
+          <div>
+            <h1>Needle Planner</h1>
+            <p>String art · FluidNC</p>
+          </div>
         </div>
+        <nav
+          className="app-menu"
+          aria-label="Planner menus"
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setActivePopup(null)
+            }
+          }}
+        >
+          {(['file', 'settings', 'machine'] as const).map(menu => (
+            <div className="app-menu-entry" key={menu}>
+              <button
+                aria-haspopup="menu"
+                aria-expanded={activePopup === menu}
+                onClick={() => toggleMenu(menu)}
+              >{menu[0].toUpperCase() + menu.slice(1)}</button>
+              {activePopup === menu && (
+                <div className="menu-popup" role="menu">
+                  {APP_MENU_ITEMS[menu].map(item => (
+                    <button role="menuitem" key={item.dialog} onClick={() => openDialog(item.dialog)}>{item.label}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+        <button
+          className={`hamburger-button ${mobileMenuOpen ? 'active' : ''}`}
+          aria-label={mobileMenuOpen ? 'Close planner menu' : 'Open planner menu'}
+          aria-expanded={mobileMenuOpen}
+          onClick={() => {
+            setMobileMenuOpen(value => !value)
+            setActivePopup(null)
+          }}
+        >
+          <span /><span /><span />
+        </button>
+        <div className="header-context">Planner <span>/</span> Toolpath</div>
         <span className={`connection-pill ${connected ? 'connected' : ''}`}>
           <i />
           {connected ? machineStatus.state : 'Not connected'}
         </span>
       </header>
-
-      <main className="workspace">
-        <aside className="settings panel">
-          <h2>Planner settings</h2>
-          {FIELD_GROUPS.map(group => (
-            <details
-              key={group.title}
-              open={fieldGroupsOpen[group.title]}
-              className="field-group"
-              onToggle={event => {
-                const open = event.currentTarget.open
-                setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
-              }}
-            >
-              <summary>{group.title}</summary>
-              <div className="field-grid">
-                {group.fields.map(field => (
-                  <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
-                    <span>{field.label}</span>
-                    <input
-                      type={field.check ? 'checkbox' : 'number'}
-                      step={field.check ? undefined : 'any'}
-                      min={field.key === 'n' ? 3 : undefined}
-                      value={field.check ? undefined : Number(raw[field.key])}
-                      checked={field.check ? Boolean(raw[field.key]) : undefined}
-                      onChange={event => updateField(field.key, event)}
-                    />
-                  </label>
+      {mobileMenuOpen && (
+        <div className="mobile-menu-backdrop" onClick={() => { setMobileMenuOpen(false); setActivePopup(null) }}>
+          <nav
+            className="mobile-menu"
+            role="menu"
+            aria-label="Planner menus"
+            onClick={event => event.stopPropagation()}
+            onKeyDown={event => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setActivePopup(null)
+                setMobileMenuOpen(false)
+              }
+            }}
+          >
+            {activePopup ? (
+              <>
+                <button className="mobile-menu-back" onClick={() => setActivePopup(null)}>‹ All menus</button>
+                {APP_MENU_ITEMS[activePopup].map(item => (
+                  <button role="menuitem" key={item.dialog} onClick={() => openDialog(item.dialog)}>{item.label}</button>
                 ))}
-              </div>
-              {group.kind === 'loop' && (
-                <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...autoLoop(prepare(raw)) })}>
-                  Set loop values automatically
+              </>
+            ) : (
+              (['file', 'settings', 'machine'] as const).map(menu => (
+                <button role="menuitem" key={menu} onClick={() => setActivePopup(menu)}>
+                  <b>{menu[0].toUpperCase() + menu.slice(1)}</b><span>{APP_MENU_ITEMS[menu].map(item => item.label).join(' · ')}</span>
                 </button>
-              )}
-              {group.kind === 'contact' && (
-                <div className="inline-actions">
-                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactOuter(plan.p) })}>Contact = cap rim</button>
-                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactInner(plan.p) })}>Contact = inner shaft</button>
-                </div>
-              )}
-            </details>
-          ))}
+              ))
+            )}
+          </nav>
+        </div>
+      )}
 
-          <section className="subpanel">
-            <h3>Sequence</h3>
-            <div className="inline-actions">
-              <label className="file-button">Load sequence<input type="file" accept=".txt,.csv,.nc,.gcode" onChange={event => handleSequenceFile(event.target.files?.[0])} /></label>
-              <button onClick={() => {
-                setFileName('demo')
-                setSequence(Array.from({ length: 90 }, (_, k) => (k * 37) % raw.n + raw.ib).join('\n'))
-              }}>Demo</button>
-              <button onClick={() => {
-                const values = [...Array.from({ length: Math.max(1, raw.n | 0) }, (_, k) => raw.ib + k), ...Array.from({ length: Math.max(0, (raw.n | 0) - 1) }, (_, k) => raw.ib + raw.n - 2 - k)]
-                setFileName('calibration')
-                setSequence(values.join('\n'))
-                notify(`Calibration sequence: ${values.length} visits (${raw.n} nails there and back).`)
-              }}>Calibration pattern</button>
-            </div>
-            <textarea aria-label="Nail sequence" value={sequence} onChange={event => setSequence(event.target.value)} />
-            <p className="hint">Enter nail numbers separated by spaces, commas, or new lines.</p>
-          </section>
-
-          <section className="subpanel">
-            <h3>Calibration anchors</h3>
-            <div className="anchor-table">
-              <div className="anchor-row anchor-heading"><span>Anchor</span><span>Nail #</span><span>X</span><span>Y</span><span>Pick</span></div>
-              {anchors.map((anchor, index) => (
-                <div className="anchor-row" key={index}>
-                  <span>{index + 1}</span>
-                  {(['nail', 'x', 'y'] as const).map(key => (
-                    <input
-                      key={key}
-                      type="number"
-                      step="any"
-                      value={anchor[key]}
-                      aria-label={`Anchor ${index + 1} ${key}`}
-                      onChange={event => updateAnchor(index, key, Number(event.target.value))}
-                    />
-                  ))}
-                  <button
-                    className={pickedAnchor === index ? 'selected' : ''}
-                    aria-label={`Set anchor ${index + 1} from map`}
-                    onClick={() => {
-                      setPickedAnchor(index)
-                      setAnchorPickMode(true)
-                      notify(`Click the map to place anchor ${index + 1}.`)
-                    }}
-                  >Map</button>
-                </div>
-              ))}
-            </div>
-            <div className="inline-actions">
-              <button onClick={resetAnchors}>Reset anchors to ideal</button>
-              <button onClick={fitRadiusToAnchors}>Set radius from anchors</button>
-            </div>
-          </section>
-        </aside>
-
+      <main className="workspace" onClick={() => setActivePopup(null)}>
         <section className="planner-column">
           <section className="panel planner-panel">
             <div className="section-heading">
@@ -735,6 +811,11 @@ function App() {
                 <button onClick={() => setFitRequest(value => value + 1)}>Fit view</button>
                 <button onClick={() => { setVisibleVisits(0); setPlaying(true) }}>{playing ? 'Playing…' : '▶ Play'}</button>
               </div>
+            </div>
+            <div className="path-legend" aria-label="Toolpath legend">
+              <span><i className="thread-line" />Thread path</span>
+              <span><i className="approach-line" />Approach from home</span>
+              <span><i className="exit-line" />Return to home</span>
             </div>
             <PlannerCanvas
               plan={plan}
@@ -778,32 +859,6 @@ function App() {
             )}
           </section>
 
-          <section className="panel machine-panel">
-            <div className="section-heading">
-              <h2>Machine &amp; G-code</h2>
-              <span className="machine-coordinate">
-                {machineStatus.pos ? `X ${machineStatus.pos[0].toFixed(3)} · Y ${machineStatus.pos[1].toFixed(3)}` : 'Position unavailable'}
-              </span>
-            </div>
-            <div className="machine-actions">
-              <button onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
-              <button onClick={() => void copyGcode()}>Copy G-code</button>
-              <button className="primary" disabled={!connected || acting || client.running || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
-              {runPaused && <button className="primary" onClick={() => { client.resumeRun(); setRunPaused(false) }}>Thread attached: Resume</button>}
-              <label className="board-name">Board job<input value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
-              <button className="primary" disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>⬆ Upload to SD</button>
-              <button className="primary" disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
-              {connected && machineStatus.sd != null && /^Hold/.test(machineStatus.state) && <button className="primary" onClick={() => client.resumeHold()}>Resume SD job</button>}
-              {connected && <button className="danger" onClick={stopMachine}>■ Stop</button>}
-            </div>
-            {(runMessage || uploadInfo) && <p className="machine-message">{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}{uploadInfo ? ` ${uploadInfo}` : ''}</p>}
-            {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
-            {uploading && <p className="hint">Uploading… {uploadSeconds}s</p>}
-            <details className="gcode-details">
-              <summary>G-code text</summary>
-              <textarea readOnly value={gcode} />
-            </details>
-          </section>
         </section>
 
         <aside className="control-column">
@@ -877,16 +932,117 @@ function App() {
             <p className="keyboard-hint">Enter go / record · arrows jog XY · W/S radial · A/D along ring · Shift ×10 · [ ] step · Esc stop</p>
           </section>
 
-          <details className="panel board-files" open={filesOpen} onToggle={event => {
-            const open = event.currentTarget.open
-            setFilesOpen(open)
-            if (open) void refreshFiles()
-          }}>
-            <summary>Board files</summary>
+        </aside>
+      </main>
+      <AppDialog open={activeDialog === 'settings'} title="Planner settings" onClose={() => setActiveDialog(null)}>
+        <div className="settings-dialog-content">
+          {FIELD_GROUPS.filter(group => group.title !== 'Machine and nudge').map(group => (
+            <details
+              key={group.title}
+              open={fieldGroupsOpen[group.title]}
+              className="field-group"
+              onToggle={event => {
+                const open = event.currentTarget.open
+                setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
+              }}
+            >
+              <summary>{group.title}</summary>
+              <div className="field-grid">
+                {group.fields.map(field => (
+                  <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
+                    <span>{field.label}</span>
+                    <input
+                      type={field.check ? 'checkbox' : 'number'}
+                      step={field.check ? undefined : 'any'}
+                      min={field.key === 'n' ? 3 : undefined}
+                      value={field.check ? undefined : Number(raw[field.key])}
+                      checked={field.check ? Boolean(raw[field.key]) : undefined}
+                      onChange={event => updateField(field.key, event)}
+                    />
+                  </label>
+                ))}
+              </div>
+              {group.kind === 'loop' && (
+                <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...autoLoop(prepare(raw)) })}>
+                  Set loop values automatically
+                </button>
+              )}
+              {group.kind === 'contact' && (
+                <div className="inline-actions">
+                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactOuter(plan.p) })}>Contact = cap rim</button>
+                  <button className="subtle-button" onClick={() => applyRaw({ ...raw, ...contactInner(plan.p) })}>Contact = inner shaft</button>
+                </div>
+              )}
+            </details>
+          ))}
+        </div>
+      </AppDialog>
+      <AppDialog
+        open={activeDialog === 'sequence' || activeDialog === 'gcode' || activeDialog === 'boardFiles'}
+        title={activeDialog === 'sequence' ? 'Nail sequence' : activeDialog === 'gcode' ? 'G-code job' : 'Board files'}
+        onClose={() => setActiveDialog(null)}
+      >
+        <div className="files-dialog-content">
+          <section className="dialog-section sequence-dialog-content" hidden={activeDialog !== 'sequence'}>
+            <div className="dialog-section-heading">
+              <div>
+                <h3>Nail sequence</h3>
+                <p>Load or edit the nail visit order used to generate this job.</p>
+              </div>
+              <label className="file-button">Load sequence<input type="file" accept=".txt,.csv,.nc,.gcode" onChange={event => handleSequenceFile(event.target.files?.[0])} /></label>
+            </div>
+            <div className="inline-actions">
+              <button onClick={() => {
+                setFileName('demo')
+                setSequence(Array.from({ length: 90 }, (_, k) => (k * 37) % raw.n + raw.ib).join('\n'))
+              }}>Generate demo</button>
+              <button onClick={() => {
+                const values = [...Array.from({ length: Math.max(1, raw.n | 0) }, (_, k) => raw.ib + k), ...Array.from({ length: Math.max(0, (raw.n | 0) - 1) }, (_, k) => raw.ib + raw.n - 2 - k)]
+                setFileName('calibration')
+                setSequence(values.join('\n'))
+                notify(`Calibration sequence: ${values.length} visits (${raw.n} nails there and back).`)
+              }}>Calibration pattern</button>
+              <span className="sequence-count">{sequence.split(/[\s,;]+/).filter(Boolean).length} entries</span>
+            </div>
+            <textarea aria-label="Nail sequence" value={sequence} onChange={event => setSequence(event.target.value)} />
+            <p className="hint">Enter nail numbers separated by spaces, commas, or new lines. Invalid nail numbers are skipped.</p>
+          </section>
+          <section className="dialog-section file-job-section" hidden={activeDialog !== 'gcode'}>
+            <div className="dialog-section-heading">
+              <div>
+                <h3>G-code job</h3>
+                <p>Save locally, copy, or transfer the generated job to FluidNC.</p>
+              </div>
+              <span className="machine-coordinate">
+                {machineStatus.pos ? `X ${machineStatus.pos[0].toFixed(3)} · Y ${machineStatus.pos[1].toFixed(3)}` : 'Position unavailable'}
+              </span>
+            </div>
+            <div className="machine-actions">
+              <button onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
+              <button onClick={() => void copyGcode()}>Copy G-code</button>
+              <button className="primary" disabled={!connected || acting || client.running || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
+              {runPaused && <button className="primary" onClick={() => { client.resumeRun(); setRunPaused(false) }}>Thread attached: Resume</button>}
+              <label className="board-name">Board job<input value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
+              <button className="primary" disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>⬆ Upload to SD</button>
+              <button className="primary" disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
+              {connected && machineStatus.sd != null && /^Hold/.test(machineStatus.state) && <button className="primary" onClick={() => client.resumeHold()}>Resume SD job</button>}
+            </div>
+            {(runMessage || uploadInfo) && <p className="machine-message">{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}{uploadInfo ? ` ${uploadInfo}` : ''}</p>}
+            {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
+            {uploading && <p className="hint">Uploading… {uploadSeconds}s</p>}
+            <details className="gcode-details">
+              <summary>G-code text</summary>
+              <textarea readOnly value={gcode} />
+            </details>
+          </section>
+          <section className="dialog-section board-files-section" hidden={activeDialog !== 'boardFiles'}>
+            <div className="dialog-section-heading">
+              <div><h3>FluidNC files</h3><p>Browse files stored on the controller.</p></div>
+              <button onClick={() => void refreshFiles()}>Refresh</button>
+            </div>
             <div className="files-toolbar">
               <button className={filesKind === 'SD' ? 'selected' : ''} onClick={() => { setFilesKind('SD'); setFiles([]); void refreshFiles('SD') }}>SD card</button>
               <button className={filesKind === 'LocalFS' ? 'selected' : ''} onClick={() => { setFilesKind('LocalFS'); setFiles([]); void refreshFiles('LocalFS') }}>Flash</button>
-              <button onClick={() => void refreshFiles()}>Refresh</button>
             </div>
             <p className="hint">{filesInfo}</p>
             <div className="file-list">
@@ -906,11 +1062,95 @@ function App() {
                 )
               })}
             </div>
-          </details>
-        </aside>
-      </main>
+          </section>
+        </div>
+      </AppDialog>
+      <AppDialog
+        open={activeDialog === 'machineConfig' || activeDialog === 'anchors'}
+        title={activeDialog === 'machineConfig' ? 'Machine configuration' : 'Calibration anchors'}
+        onClose={() => setActiveDialog(null)}
+      >
+        <div className="machine-dialog-content">
+          <section className="dialog-section machine-config-section" hidden={activeDialog !== 'machineConfig'}>
+            <div className="dialog-section-heading">
+              <div><h3>Machine configuration</h3><p>Set the planner's machine geometry and movement calibration.</p></div>
+            </div>
+            {FIELD_GROUPS.filter(group => group.title === 'Machine and nudge').map(group => (
+              <details
+                key={group.title}
+                open={fieldGroupsOpen[group.title]}
+                className="field-group"
+                onToggle={event => {
+                  const open = event.currentTarget.open
+                  setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
+                }}
+              >
+                <summary>{group.title}</summary>
+                <div className="field-grid">
+                  {group.fields.map(field => (
+                    <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
+                      <span>{field.label}</span>
+                      <input
+                        type={field.check ? 'checkbox' : 'number'}
+                        step={field.check ? undefined : 'any'}
+                        min={field.key === 'n' ? 3 : undefined}
+                        value={field.check ? undefined : Number(raw[field.key])}
+                        checked={field.check ? Boolean(raw[field.key]) : undefined}
+                        onChange={event => updateField(field.key, event)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </section>
+          <section className="dialog-section calibration-dialog-content" hidden={activeDialog !== 'anchors'}>
+            <div className="dialog-section-heading">
+              <div><h3>Calibration anchors</h3><p>Measure three nails or enter machine coordinates. Use Map to set an anchor from the plan view.</p></div>
+              <span className={`calibration-count ${measuredCount >= 3 ? 'complete' : ''}`}>{measuredCount} measured</span>
+            </div>
+            <div className="anchor-table">
+              <div className="anchor-row anchor-heading"><span>Anchor</span><span>Nail #</span><span>X (mm)</span><span>Y (mm)</span><span>Pick</span></div>
+              {anchors.map((anchor, index) => (
+                <div className="anchor-row" key={index}>
+                  <span>{index + 1}</span>
+                  {(['nail', 'x', 'y'] as const).map(key => (
+                    <input key={key} type="number" step="any" value={anchor[key]} aria-label={`Anchor ${index + 1} ${key}`} onChange={event => updateAnchor(index, key, Number(event.target.value))} />
+                  ))}
+                  <button
+                    className={pickedAnchor === index ? 'selected' : ''}
+                    aria-label={`Set anchor ${index + 1} from map`}
+                    onClick={() => {
+                      setPickedAnchor(index)
+                      setAnchorPickMode(true)
+                      setActiveDialog(null)
+                      notify(`Click the map to place anchor ${index + 1}.`)
+                    }}
+                  >Map</button>
+                </div>
+              ))}
+            </div>
+            <div className="inline-actions">
+              <button onClick={resetAnchors}>Reset anchors to ideal</button>
+              <button onClick={fitRadiusToAnchors}>Set nail radius from anchors</button>
+              <button onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export measurements</button>
+              <label className="file-button">Import measurements<input type="file" accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
+              <button className="danger" onClick={() => {
+                if (!window.confirm('Delete all recorded nail positions?')) return
+                setMeasurements({})
+                notify('Cleared calibration measurements.')
+              }}>Clear measurements</button>
+            </div>
+            <p className="calibration-result">
+              Fit residual: <b>{Number.isNaN(plan.cal.res) ? 'n/a' : `${plan.cal.res.toFixed(2)} mm`}</b>
+              {plan.cal.rc > 0 && <> · Anchor circle: <b>{plan.cal.rc.toFixed(2)} mm</b></>}
+            </p>
+          </section>
+        </div>
+      </AppDialog>
       <footer className={`toast ${error ? 'error' : ''}`} aria-live="polite">
-        <span>{message}</span>
+        <span>{message || (connected ? 'FluidNC connected' : 'Ready · Connect to FluidNC to control the machine')}</span>
+        <span className="statusbar-detail">{plan.visits} visits <b>·</b> XY only</span>
         {anchorPickMode && <button onClick={() => { setAnchorPickMode(false); setPickedAnchor(null) }}>Cancel map pick</button>}
       </footer>
     </div>
