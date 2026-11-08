@@ -239,6 +239,7 @@ function App() {
   const [showDoneOnly, setShowDoneOnly] = useState(false)
   const [visibleVisits, setVisibleVisits] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [previewPaused, setPreviewPaused] = useState(false)
   const [anchorPickMode, setAnchorPickMode] = useState(false)
   const [fitRequest, setFitRequest] = useState(0)
   const primaryActionRef = useRef<() => Promise<void>>(() => Promise.resolve())
@@ -343,18 +344,16 @@ function App() {
 
   useEffect(() => {
     if (!playing || plan.visits < 1) return
-    const timer = window.setInterval(() => {
-      setVisibleVisits(current => {
-        const next = (current ?? 0) + 1
-        return Math.min(next, plan.visits)
-      })
+    const timer = window.setTimeout(() => {
+      const next = (visibleVisits ?? 0) + 1
+      setVisibleVisits(Math.min(next, plan.visits))
+      if (next >= plan.visits) {
+        setPlaying(false)
+        setPreviewPaused(false)
+      }
     }, 60)
-    const stop = window.setTimeout(() => setPlaying(false), plan.visits * 60)
-    return () => {
-      window.clearInterval(timer)
-      window.clearTimeout(stop)
-    }
-  }, [playing, plan.visits])
+    return () => window.clearTimeout(timer)
+  }, [playing, visibleVisits, plan.visits])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -845,10 +844,32 @@ function App() {
   function runMenuAction(action: AppAction) {
     if (action === 'fit') setFitRequest(value => value + 1)
     else if (action === 'toggle-done') setShowDoneOnly(value => !value)
-    else if (action === 'play') { setVisibleVisits(0); setPlaying(true) }
+    else if (action === 'play') startPreview()
     else if (action === 'connect') void connect()
     else if (action === 'home') void home('$H', 'all axes')
     else if (action === 'stop') stopMachine()
+  }
+
+  function startPreview() {
+    setVisibleVisits(0)
+    setPreviewPaused(false)
+    setPlaying(true)
+  }
+
+  function pausePreview() {
+    setPlaying(false)
+    setPreviewPaused(true)
+  }
+
+  function resumePreview() {
+    setPreviewPaused(false)
+    setPlaying(true)
+  }
+
+  function stopPreview() {
+    setPlaying(false)
+    setPreviewPaused(false)
+    setVisibleVisits(0)
   }
 
   const firstSequenceNail = sequence
@@ -980,11 +1001,21 @@ function App() {
                   value={visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)}
                   onChange={event => {
                     setPlaying(false)
+                    setPreviewPaused(false)
                     setVisibleVisits(Number(event.target.value))
                   }}
                 />
                 <span className="visit-count">{visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)} / {plan.visits}</span>
-                <button title="Animate the thread path from the first visit to the last." onClick={() => { setVisibleVisits(0); setPlaying(true) }}>{playing ? 'Playing…' : '▶ Play'}</button>
+                {playing ? (
+                  <button title="Pause the preview animation." onClick={pausePreview}>Ⅱ Pause</button>
+                ) : previewPaused ? (
+                  <button title="Resume the preview animation from the current visit." onClick={resumePreview}>▶ Resume</button>
+                ) : (
+                  <button title="Animate the thread path from the first visit to the last." onClick={startPreview}>▶ Play</button>
+                )}
+                {(playing || previewPaused) && (
+                  <button title="Stop the preview animation and return to the beginning." onClick={stopPreview}>■ Stop</button>
+                )}
               </div>
             </div>
             <PlannerCanvas
