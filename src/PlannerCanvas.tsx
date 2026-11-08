@@ -1,0 +1,388 @@
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import {
+  footprint,
+  predict,
+  type Anchor,
+  type Measurements,
+  type Plan,
+  type Vec,
+} from './lib/planner.ts'
+import { fitView, panBy, zoomAt, type View } from './lib/view.ts'
+import type { Progress } from './lib/progress.ts'
+
+type Props = {
+  plan: Plan
+  anchors: Anchor[]
+  measurements: Measurements
+  machinePosition: Vec | null
+  selectedNail: number | null
+  progress: Progress
+  showDoneOnly: boolean
+  visibleVisits: number
+  pickingAnchor: boolean
+  fitRequest: number
+  onAnchorPoint: (point: Vec) => void
+}
+
+const COLORS = {
+  bed: '#c7cbd4',
+  label: '#6e7480',
+  nail: '#8f80a8',
+  path: '#a43bff',
+  approach: '#2676ca',
+  exit: '#d08030',
+  measured: '#239667',
+  active: '#c02960',
+  machine: '#17151d',
+  white: '#fff',
+}
+
+function resizeCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; width: number; height: number } | null {
+  const width = canvas.clientWidth
+  const height = canvas.clientHeight
+  if (!width || !height) return null
+  const ratio = window.devicePixelRatio || 1
+  const pixelWidth = Math.round(width * ratio)
+  const pixelHeight = Math.round(height * ratio)
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  return { ctx, width, height }
+}
+
+function drawPolyline(
+  ctx: CanvasRenderingContext2D,
+  points: Vec[],
+  x: (value: number) => number,
+  y: (value: number) => number,
+  color: string,
+  width: number,
+  dash: number[] = [],
+) {
+  if (points.length < 2) return
+  ctx.strokeStyle = color
+  ctx.lineWidth = width
+  ctx.setLineDash(dash)
+  ctx.beginPath()
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(x(point[0]), y(point[1]))
+    else ctx.lineTo(x(point[0]), y(point[1]))
+  })
+  ctx.stroke()
+  ctx.setLineDash([])
+}
+
+function drawMain(
+  canvas: HTMLCanvasElement,
+  view: View,
+  props: Props,
+) {
+  const dimensions = resizeCanvas(canvas)
+  if (!dimensions) return
+  const { ctx } = dimensions
+  const { plan, anchors, measurements, machinePosition, selectedNail, progress } = props
+  const x = (value: number) => view.ox + value * view.s
+  const y = (value: number) => view.oy - value * view.s
+  const center: Vec = [plan.cal.tx, plan.cal.ty]
+
+  ctx.save()
+  ctx.strokeStyle = COLORS.bed
+  ctx.lineWidth = 1
+  ctx.setLineDash([5, 4])
+  ctx.strokeRect(x(0), y(plan.p.bh), plan.p.bw * view.s, plan.p.bh * view.s)
+  ctx.setLineDash([])
+  ctx.fillStyle = COLORS.label
+  ctx.font = '12px system-ui, sans-serif'
+  ctx.fillText('home (0,0)', x(0) + 5, y(0) - 6)
+  ctx.beginPath()
+  ctx.arc(x(0), y(0), 3, 0, Math.PI * 2)
+  ctx.fill()
+
+  if (Number.isFinite(plan.cal.res)) {
+    ctx.strokeStyle = COLORS.bed
+    for (const radius of [plan.p.rin, plan.p.rout]) {
+      ctx.beginPath()
+      ctx.arc(x(center[0]), y(center[1]), radius * view.s, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+
+    const shaft = footprint(plan.p)
+    const cos = Math.cos(plan.cal.th)
+    const sin = Math.sin(plan.cal.th)
+    ctx.fillStyle = COLORS.nail
+    ctx.globalAlpha = 0.18
+    for (let nail = 0; nail < plan.p.n; nail++) {
+      const angle = plan.p.ang(nail)
+      const radial: Vec = [Math.cos(angle), Math.sin(angle)]
+      const tangent: Vec = [-radial[1], radial[0]]
+      const offset = plan.offset[nail] ?? [0, 0]
+      for (const section of shaft) {
+        const bx = (plan.p.Rh + section[0]) * radial[0] + section[1] * tangent[0]
+        const by = (plan.p.Rh + section[0]) * radial[1] + section[1] * tangent[1]
+        const px = cos * bx - sin * by + center[0] + offset[0]
+        const py = sin * bx + cos * by + center[1] + offset[1]
+        ctx.beginPath()
+        ctx.ellipse(
+          x(px),
+          y(py),
+          Math.max(section[2] * view.s, 0.35),
+          Math.max(section[3] * view.s, 0.35),
+          -(angle + plan.cal.th),
+          0,
+          Math.PI * 2,
+        )
+        ctx.fill()
+      }
+    }
+    ctx.globalAlpha = 1
+  }
+
+  if (plan.route.length) drawPolyline(ctx, [[0, 0], ...plan.route], x, y, COLORS.approach, 1.4, [6, 4])
+  if (plan.exit.length && plan.mp.length) {
+    drawPolyline(ctx, [plan.mp[plan.mp.length - 1], ...plan.exit], x, y, COLORS.exit, 1.4, [6, 4])
+  }
+  if (plan.mp.length) {
+    ctx.fillStyle = COLORS.approach
+    ctx.beginPath()
+    ctx.arc(x(plan.mp[0][0]), y(plan.mp[0][1]), 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillText('M0: attach thread', x(plan.mp[0][0]) + 7, y(plan.mp[0][1]) + 13)
+  }
+
+  if (props.showDoneOnly && progress.path) {
+    const end = Math.max(0, Math.min(progress.idx, progress.path.length - 1))
+    const index = Math.floor(end)
+    const partial = progress.path.slice(0, index + 1)
+    if (index < progress.path.length - 1) {
+      const fraction = end - index
+      const a = progress.path[index]
+      const b = progress.path[index + 1]
+      partial.push([a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction])
+    }
+    drawPolyline(ctx, partial, x, y, COLORS.path, 2)
+  } else if (plan.mp.length && props.visibleVisits > 0) {
+    const lastIndex = Math.min(plan.visits, Math.floor(props.visibleVisits)) - 1
+    const end = plan.vend[lastIndex]
+    if (end != null && end >= 0) {
+      const start = lastIndex > 0 ? plan.vend[lastIndex - 1] : 0
+      drawPolyline(ctx, plan.mp.slice(0, start + 1), x, y, COLORS.path, 1.2)
+      drawPolyline(ctx, plan.mp.slice(start, end + 1), x, y, COLORS.path, 2.4)
+      ctx.strokeStyle = COLORS.machine
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(x(plan.mp[end][0]), y(plan.mp[end][1]), Math.max(plan.p.ndl / 2 * view.s, 2), 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  }
+
+  for (const anchor of anchors) {
+    const px = x(anchor.x)
+    const py = y(anchor.y)
+    ctx.strokeStyle = COLORS.measured
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(px - 5, py)
+    ctx.lineTo(px + 5, py)
+    ctx.moveTo(px, py - 5)
+    ctx.lineTo(px, py + 5)
+    ctx.stroke()
+    ctx.fillStyle = COLORS.measured
+    ctx.fillText(String(anchor.nail), px + 6, py - 6)
+    if (measurements[anchor.nail - plan.p.ib]) {
+      ctx.beginPath()
+      ctx.arc(px, py, 3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  for (const [key, measured] of Object.entries(measurements)) {
+    const nail = Number(key)
+    const predicted = predict(plan.p, plan.cal, nail)
+    ctx.strokeStyle = COLORS.measured
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(x(predicted[0]), y(predicted[1]))
+    ctx.lineTo(x(predicted[0] + (measured[0] - predicted[0]) * 20), y(predicted[1] + (measured[1] - predicted[1]) * 20))
+    ctx.stroke()
+    ctx.fillStyle = COLORS.measured
+    ctx.beginPath()
+    ctx.arc(x(measured[0]), y(measured[1]), 2.5, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  if (selectedNail != null && Number.isFinite(plan.cal.res)) {
+    const predicted = predict(plan.p, plan.cal, selectedNail)
+    const offset = plan.offset[selectedNail] ?? [0, 0]
+    ctx.strokeStyle = COLORS.active
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(x(predicted[0] + offset[0]), y(predicted[1] + offset[1]), 9, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  if (machinePosition) {
+    const px = x(machinePosition[0])
+    const py = y(machinePosition[1])
+    ctx.strokeStyle = COLORS.machine
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.arc(px, py, Math.max(plan.p.ndl / 2 * view.s + 2, 5), 0, Math.PI * 2)
+    ctx.moveTo(px - 9, py)
+    ctx.lineTo(px + 9, py)
+    ctx.moveTo(px, py - 9)
+    ctx.lineTo(px, py + 9)
+    ctx.stroke()
+  }
+
+  ctx.font = '12px system-ui, sans-serif'
+  const legend: [string, string, number[]][] = [
+    [COLORS.path, 'Thread path', []],
+    [COLORS.approach, 'Approach from home', [5, 4]],
+    [COLORS.exit, 'Return to home', [5, 4]],
+  ]
+  legend.forEach(([color, label, dash], index) => {
+    const top = 17 + index * 16
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.setLineDash(dash)
+    ctx.beginPath()
+    ctx.moveTo(12, top - 4)
+    ctx.lineTo(34, top - 4)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.fillStyle = COLORS.label
+    ctx.fillText(label, 41, top)
+  })
+  ctx.restore()
+}
+
+function drawLocal(canvas: HTMLCanvasElement, plan: Plan) {
+  const dimensions = resizeCanvas(canvas)
+  if (!dimensions) return
+  const { ctx, width, height } = dimensions
+  const scale = Math.min(width, height * 2.1) / 36
+  const x = (value: number) => width / 2 + (value - plan.p.Rh - 2) * scale
+  const y = (value: number) => height / 2 - value * scale
+  ctx.save()
+  ctx.fillStyle = COLORS.nail
+  ctx.globalAlpha = 0.3
+  for (const point of plan.ccw.footprint) {
+    ctx.beginPath()
+    ctx.arc(x(point[0]), y(point[1]), 1.4, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+  drawPolyline(ctx, plan.ccw.path, x, y, COLORS.path, 2)
+  drawPolyline(ctx, plan.cw.path, x, y, COLORS.approach, 2)
+  ctx.fillStyle = COLORS.label
+  ctx.font = '11px system-ui, sans-serif'
+  ctx.fillText('outward →', width - 72, 15)
+  ctx.fillStyle = COLORS.path
+  ctx.fillText('CCW wrap', 8, 15)
+  ctx.fillStyle = COLORS.approach
+  ctx.fillText('CW wrap', 8, 29)
+  ctx.restore()
+}
+
+export default function PlannerCanvas(props: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const localCanvasRef = useRef<HTMLCanvasElement>(null)
+  const [view, setView] = useState<View | null>(null)
+  const pointer = useRef<{ x: number; y: number; dragged: boolean } | null>(null)
+  const suppressClick = useRef(false)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const resize = () => {
+      setView(current => current
+        ? { ...current }
+        : fitView(canvas.clientWidth, canvas.clientHeight, props.plan.p.bw, props.plan.p.bh))
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(canvas)
+    resize()
+    return () => observer.disconnect()
+  }, [props.plan.p.bw, props.plan.p.bh])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    setView(fitView(canvas.clientWidth, canvas.clientHeight, props.plan.p.bw, props.plan.p.bh))
+  }, [props.fitRequest, props.plan.p.bw, props.plan.p.bh])
+
+  useEffect(() => {
+    const main = canvasRef.current
+    const local = localCanvasRef.current
+    if (!main || !local) return
+    if (!view) setView(fitView(main.clientWidth, main.clientHeight, props.plan.p.bw, props.plan.p.bh))
+    else drawMain(main, view, props)
+    drawLocal(local, props.plan)
+  }, [props, view])
+
+  function fit() {
+    const canvas = canvasRef.current
+    if (canvas) setView(fitView(canvas.clientWidth, canvas.clientHeight, props.plan.p.bw, props.plan.p.bh))
+  }
+
+  function handleClick(event: MouseEvent<HTMLCanvasElement>) {
+    if (suppressClick.current) {
+      suppressClick.current = false
+      return
+    }
+    if (!props.pickingAnchor || !view) return
+    const bounds = event.currentTarget.getBoundingClientRect()
+    props.onAnchorPoint([
+      (event.clientX - bounds.left - view.ox) / view.s,
+      (view.oy - (event.clientY - bounds.top)) / view.s,
+    ])
+  }
+
+  return (
+    <div className="canvas-layout">
+      <div className={`main-canvas-wrap ${props.pickingAnchor ? 'picking' : ''}`}>
+        <canvas
+          ref={canvasRef}
+          className="main-canvas"
+          aria-label="Machine bed and generated thread path"
+          onClick={handleClick}
+          onDoubleClick={fit}
+          onWheel={event => {
+            if (!view) return
+            const bounds = event.currentTarget.getBoundingClientRect()
+            setView(zoomAt(view, event.clientX - bounds.left, event.clientY - bounds.top, event.deltaY))
+          }}
+          onPointerDown={event => {
+            pointer.current = { x: event.clientX, y: event.clientY, dragged: false }
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerMove={event => {
+            const start = pointer.current
+            if (!start || !view) return
+            const dx = event.clientX - start.x
+            const dy = event.clientY - start.y
+            if (Math.hypot(dx, dy) > 3) start.dragged = true
+            if (start.dragged) {
+              setView(panBy(view, dx, dy))
+              pointer.current = { x: event.clientX, y: event.clientY, dragged: true }
+            }
+          }}
+          onPointerUp={() => {
+            suppressClick.current = pointer.current?.dragged ?? false
+            pointer.current = null
+          }}
+          onPointerCancel={() => { pointer.current = null }}
+        />
+        {props.pickingAnchor && <span className="canvas-instruction">Click the board to place the selected anchor</span>}
+      </div>
+      <div className="local-view">
+        <canvas ref={localCanvasRef} aria-label="Nail footprint and loop clearance" />
+        <p>Local view: one nail footprint, neighboring nails, and both loop directions</p>
+      </div>
+    </div>
+  )
+}
