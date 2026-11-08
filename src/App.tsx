@@ -37,8 +37,10 @@ const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 5]
 const INITIAL = startingPoint()
 const THEME_STORAGE_KEY = 'filum-theme'
 type ThemePreference = 'system' | 'light' | 'dark'
-type AppMenu = 'file' | 'settings' | 'machine' | 'help'
+type AppMenu = 'file' | 'settings' | 'help'
 type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help'
+type AppMenuItem = { label: string; dialog: AppDialogView; title?: string }
+type AppMenuGroup = { label: string; items: AppMenuItem[] }
 
 function storedThemePreference(): ThemePreference {
   try {
@@ -52,22 +54,40 @@ function storedThemePreference(): ThemePreference {
   }
 }
 
-const APP_MENU_ITEMS: Record<AppMenu, { label: string; dialog: AppDialogView; title?: string }[]> = {
-  settings: [{ label: 'Planner settings', dialog: 'settings' }],
+const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
+  settings: [
+    { label: 'Planner', items: [{ label: 'Planner settings', dialog: 'settings' }] },
+    { label: 'Machine setup', items: [
+      { label: 'Machine configuration', dialog: 'machineConfig' },
+      { label: 'Calibration anchors', dialog: 'anchors' },
+    ] },
+  ],
   file: [
-    { label: 'Nail sequence', dialog: 'sequence' },
-    { label: 'G-code job', dialog: 'gcode' },
-    { label: 'Board files', dialog: 'boardFiles' },
+    { label: 'Project', items: [
+      { label: 'Nail sequence', dialog: 'sequence' },
+      { label: 'G-code job', dialog: 'gcode' },
+    ] },
+    { label: 'Controller', items: [{ label: 'Board files', dialog: 'boardFiles' }] },
   ],
-  machine: [
-    { label: 'Machine configuration', dialog: 'machineConfig' },
-    { label: 'Calibration anchors', dialog: 'anchors' },
-  ],
-  help: [{
+  help: [{ label: 'Help', items: [{
     label: 'Keyboard shortcuts and notes',
     dialog: 'help',
     title: 'Show keyboard shortcuts and map controls',
-  }],
+  }] }],
+}
+
+const APP_MENUS: AppMenu[] = ['file', 'settings', 'help']
+
+function renderMenuItems(menu: AppMenu, onSelect: (dialog: AppDialogView) => void) {
+  return APP_MENU_GROUPS[menu].map((group, groupIndex) => (
+    <div className="menu-group" key={group.label}>
+      {groupIndex > 0 && <div className="menu-separator" role="separator" />}
+      <div className="menu-group-label">{group.label}</div>
+      {group.items.map(item => (
+        <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => onSelect(item.dialog)}>{item.label}</button>
+      ))}
+    </div>
+  ))
 }
 
 function AppDialog({
@@ -206,6 +226,13 @@ function App() {
       console.warn('Unable to save the Filum theme preference.', error)
     }
   }, [theme])
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
+  }, [mobileMenuOpen])
 
   const plan = useMemo(
     () => computePlan(raw, sequence, anchors, measurements),
@@ -784,7 +811,7 @@ function App() {
             }
           }}
         >
-          {(['file', 'settings', 'machine', 'help'] as const).map(menu => (
+          {APP_MENUS.map(menu => (
             <div className="app-menu-entry" key={menu}>
               <button
                 aria-haspopup="menu"
@@ -794,9 +821,7 @@ function App() {
               >{menu[0].toUpperCase() + menu.slice(1)}</button>
               {activePopup === menu && (
                 <div className="menu-popup" role="menu">
-                  {APP_MENU_ITEMS[menu].map(item => (
-                    <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => openDialog(item.dialog)}>{item.label}</button>
-                  ))}
+                  {renderMenuItems(menu, openDialog)}
                 </div>
               )}
             </div>
@@ -825,7 +850,7 @@ function App() {
           <nav
             className="mobile-menu"
             role="menu"
-            aria-label="Planner menus"
+            aria-label="Planner navigation"
             onClick={event => event.stopPropagation()}
             onKeyDown={event => {
               if (event.key === 'Escape') {
@@ -835,20 +860,29 @@ function App() {
               }
             }}
           >
-            {activePopup ? (
-              <>
-                <button className="mobile-menu-back" title="Return to the list of menus." onClick={() => setActivePopup(null)}>‹ All menus</button>
-                {APP_MENU_ITEMS[activePopup].map(item => (
-                  <button role="menuitem" key={item.dialog} title={item.title ?? `Open ${item.label.toLowerCase()}.`} onClick={() => openDialog(item.dialog)}>{item.label}</button>
-                ))}
-              </>
-            ) : (
-              (['file', 'settings', 'machine', 'help'] as const).map(menu => (
-                <button role="menuitem" key={menu} title={`Browse ${menu} commands.`} onClick={() => setActivePopup(menu)}>
-                  <b>{menu[0].toUpperCase() + menu.slice(1)}</b><span>{APP_MENU_ITEMS[menu].map(item => item.label).join(' · ')}</span>
+            <div className="mobile-menu-header">
+              <span className="mobile-menu-brand">filum<span>.</span></span>
+              <button
+                className="mobile-menu-close"
+                aria-label="Close planner menu"
+                title="Close planner navigation."
+                onClick={() => { setMobileMenuOpen(false); setActivePopup(null) }}
+              >×</button>
+            </div>
+            {APP_MENUS.map(menu => (
+              <section className="mobile-menu-section" key={menu}>
+                <button
+                  className="mobile-menu-section-toggle"
+                  aria-expanded={activePopup === menu}
+                  title={`${activePopup === menu ? 'Hide' : 'Show'} ${menu} commands.`}
+                  onClick={() => toggleMenu(menu)}
+                >
+                  <span>{menu[0].toUpperCase() + menu.slice(1)}</span>
+                  <span className="mobile-menu-chevron" aria-hidden="true">{activePopup === menu ? '▴' : '▾'}</span>
                 </button>
-              ))
-            )}
+                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog)}</div>}
+              </section>
+            ))}
           </nav>
         </div>
       )}

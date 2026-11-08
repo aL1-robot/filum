@@ -2872,6 +2872,88 @@ button.danger {
   .job-progress:empty {
     display: none;
   }
+}
+
+.app-menu {
+  gap: 1px;
+}
+
+.app-menu > .app-menu-entry > button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--chrome-text);
+  font-size: 11px;
+}
+
+.app-menu > .app-menu-entry > button:hover,
+.app-menu > .app-menu-entry > button[aria-expanded='true'] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--chrome-text) 10%, transparent);
+  color: var(--chrome-text);
+}
+
+.app-menu .menu-popup {
+  top: calc(100% + 3px);
+  min-width: 224px;
+  padding: 5px;
+  border-color: var(--border);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(17 17 20 / 22%);
+}
+
+.menu-group {
+  display: grid;
+  gap: 1px;
+}
+
+.menu-group-label {
+  padding: 7px 9px 3px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 5px;
+  background: var(--border);
+}
+
+.app-menu .menu-popup button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--heading);
+  font-size: 11px;
+}
+
+.app-menu .menu-popup button:hover,
+.app-menu .menu-popup button:focus-visible {
+  border-color: transparent;
+  background: var(--control-hover);
+  color: var(--heading);
+}
+
+.mobile-menu .menu-group-label {
+  padding: 8px 10px 4px;
+}
+
+.mobile-menu .menu-separator {
+  margin: 4px 6px;
+}
+
+.mobile-menu .menu-group button {
+  display: block;
+  min-height: 40px;
+  padding: 7px 10px;
 
   .job-progress .progress-track {
     margin-top: 0;
@@ -2943,8 +3025,12 @@ button.danger {
 
   .job-transport {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
+  }
+
+  .job-transport button:first-child {
+    grid-column: 1 / -1;
   }
 
   .job-transport button {
@@ -2952,6 +3038,10 @@ button.danger {
     min-height: 36px;
     padding-inline: 4px;
     white-space: normal;
+  }
+
+  .job-transport .primary {
+    min-width: 0;
   }
 
   .job-tools > summary {
@@ -2992,5 +3082,567 @@ button.danger {
 
   .job-progress .progress-track {
     margin-top: 0;
+  }
+}
+
+/* Match the reference's comfortable 13px interface scale and 28px controls. */
+body {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-header {
+  flex-basis: 40px;
+  min-height: 40px;
+  gap: 8px;
+  padding-inline: 12px;
+}
+
+.app-brand {
+  min-width: 68px;
+}
+
+.app-brand h1 {
+  font-size: 17px;
+}
+
+.app-menu > .app-menu-entry > button {
+  min-height: 32px;
+  padding-inline: 11px;
+  font-size: 13px;
+}
+
+.app-menu .menu-popup button {
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.menu-group-label {
+  padding: 8px 10px 4px;
+  font-size: 10px;
+}
+
+.menu-separator {
+  margin-block: 5px;
+}
+
+.header-context,
+.connection-pill {
+  font-size: 12px;
+}
+
+.connection-pill {
+  padding: 5px 9px;
+}
+
+.workspace {
+  grid-template-columns: minmax(0, 1fr) clamp(300px, 27vw, 400px);
+}
+
+.control-column {
+  padding: 14px 16px;
+}
+
+.planner-panel .section-heading {
+  min-height: 42px;
+}
+
+.planner-panel .section-heading h2,
+.connection-panel > h2 {
+  font-size: 14px;
+}
+
+.planner-panel .section-heading p {
+  font-size: 12px;
+}
+
+.planner-panel .section-heading .inline-actions button,
+.jobbar button {
+  font-size: 12px;
+}
+
+.planner-panel > .path-legend {
+  min-height: 30px;
+  font-size: 11px;
+}
+
+.path-legend i {
+  width: 20px;
+}
+
+.visit-slider {
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.plan-summary > div {
+  min-height: 50px;
+  padding: 6px 9px;
+}
+
+.plan-summary b {
+  font-size: 15px;
+}
+
+.plan-summary span,
+.plan-summary > p {
+  font-size: 11px;
+}
+
+.warnings {
+  font-size: 12px;
+}
+
+.connection-panel > h2 {
+  min-height: 40px;
+}
+
+.connect-row input,
+.connect-row button {
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.controller-status {
+  padding-block: 8px;
+  font-size: 11px;
+}
+
+.calibration-settings {
+  gap: 8px;
+  padding-block: 8px 10px;
+  font-size: 11px;
+}
+
+.calibration-settings input[type='number'] {
+  width: 60px;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.calibration-settings button {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.calibration-actions,
+.home-actions {
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.calibration-actions button,
+.home-actions button {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.calibration-actions .primary {
+  min-height: 36px;
+}
+
+.home-actions {
+  font-size: 11px;
+}
+
+.step-buttons {
+  gap: 5px;
+  font-size: 11px;
+}
+
+.step-buttons button {
+  min-height: 28px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.jog-layout {
+  gap: 7px;
+  font-size: 11px;
+}
+
+.jog-pad {
+  gap: 4px;
+}
+
+.jog-pad button {
+  min-height: 34px;
+  font-size: 14px;
+}
+
+.message,
+.connection-panel .message,
+.connection-panel .keyboard-hint {
+  font-size: 11px;
+}
+
+.jobbar {
+  gap: 8px 12px;
+  padding: 9px 14px;
+}
+
+.job-transport button {
+  min-height: 36px;
+  padding-inline: 11px;
+  font-size: 13px;
+}
+
+.job-transport .primary {
+  min-width: 160px;
+  min-height: 38px;
+}
+
+.jobbar .board-name,
+.jobbar .board-name input {
+  font-size: 12px;
+}
+
+.jobbar .board-name input {
+  min-height: 32px;
+}
+
+.job-progress {
+  gap: 4px;
+  font-size: 12px;
+}
+
+.toast {
+  min-height: 34px;
+  font-size: 12px;
+}
+
+button,
+.file-button {
+  min-height: 28px;
+  font-size: 12px;
+}
+
+input[type='number'],
+input[type='text'],
+.connect-row input,
+.board-name input,
+select {
+  min-height: 28px;
+  font-size: 13px;
+}
+
+.field-grid label > span,
+.settings-dialog-content .field-grid label > span {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.field-group summary,
+.board-files > summary,
+.gcode-details > summary {
+  padding-block: 9px;
+  font-size: 13px;
+}
+
+.field-grid {
+  gap: 7px 10px;
+}
+
+.local-view canvas {
+  height: 96px;
+}
+
+.local-legend,
+.local-view p {
+  font-size: 11px;
+}
+
+.statusbar-detail {
+  font-size: 11px;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) clamp(300px, 31vw, 360px);
+  }
+
+  .control-column {
+    padding-inline: 13px;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-header {
+    flex-basis: 50px;
+    min-height: 50px;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .planner-column,
+  .control-column {
+    grid-column: 1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .planner-column {
+    grid-row: auto;
+    padding: 10px;
+  }
+
+  .control-column {
+    grid-row: auto;
+    padding: 14px 12px;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .planner-panel .section-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .planner-panel .section-heading .inline-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .planner-panel .section-heading .inline-actions button {
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+
+  .planner-panel > .path-legend {
+    gap: 6px 12px;
+    min-height: 34px;
+  }
+
+  .visit-slider {
+    gap: 8px;
+  }
+
+  .plan-summary > p {
+    line-height: 1.5;
+  }
+
+  .calibration-settings {
+    align-items: flex-start;
+  }
+
+  .connection-panel .keyboard-hint {
+    line-height: 1.5;
+  }
+
+  .mobile-menu button {
+    min-height: 48px;
+    font-size: 13px;
+  }
+
+  .mobile-menu button b {
+    font-size: 13px;
+  }
+
+  .mobile-menu button span {
+    font-size: 11px;
+  }
+
+  .job-transport button {
+    min-height: 40px;
+    padding-inline: 3px;
+    font-size: 11px;
+  }
+
+  .job-transport .primary {
+    min-width: 0;
+  }
+
+  .job-tools > summary {
+    padding-block: 6px;
+    font-size: 12px;
+  }
+
+  .job-group button {
+    min-height: 34px;
+    font-size: 12px;
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  input:not([type='checkbox']):not([type='range']),
+  select {
+    min-height: 42px;
+  }
+
+  .job-transport button {
+    min-height: 42px;
+  }
+}
+
+@media (max-width: 760px) {
+  .mobile-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: block;
+    background: var(--scrim);
+    animation: mobile-scrim-in 180ms ease-out both;
+  }
+
+  .mobile-menu {
+    position: absolute;
+    inset: 0 auto 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: min(88vw, 340px);
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 6px) 8px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    overflow: auto;
+    border: 0;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface-raised);
+    box-shadow: 0 18px 50px rgb(20 20 14 / 28%);
+    color: var(--heading);
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    animation: mobile-drawer-in 180ms ease-out both;
+  }
+
+  .mobile-menu-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    margin-bottom: 4px;
+    padding: 6px 4px 10px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mobile-menu-brand {
+    flex: 1;
+    color: var(--heading);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.3px;
+  }
+
+  .mobile-menu-brand span {
+    color: var(--accent);
+  }
+
+  .mobile-menu .mobile-menu-close {
+    display: grid;
+    flex: 0 0 38px;
+    place-items: center;
+    width: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .mobile-menu .mobile-menu-close:hover {
+    border: 0;
+    background: var(--control-hover);
+    color: var(--heading);
+  }
+
+  .mobile-menu-section {
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mobile-menu .mobile-menu-section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--heading);
+    font-size: 15px;
+    text-align: left;
+  }
+
+  .mobile-menu .mobile-menu-section-toggle:hover,
+  .mobile-menu .mobile-menu-section-toggle[aria-expanded='true'] {
+    border-color: transparent;
+    background: var(--control-hover);
+  }
+
+  .mobile-menu .mobile-menu-chevron {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .mobile-menu-items {
+    display: grid;
+    gap: 0;
+    padding: 0 0 8px 6px;
+  }
+
+  .mobile-menu .menu-group-label {
+    padding: 7px 10px 3px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .mobile-menu .menu-separator {
+    margin: 5px 6px;
+  }
+
+  .mobile-menu .menu-group button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--heading);
+    font-size: 15px;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .mobile-menu .menu-group button:hover,
+  .mobile-menu .menu-group button:focus-visible {
+    border-color: transparent;
+    background: var(--control-hover);
+    color: var(--heading);
+  }
+
+  .mobile-menu button:active {
+    transform: none;
+  }
+}
+
+@keyframes mobile-scrim-in {
+  from { opacity: 0 }
+  to { opacity: 1 }
+}
+
+@keyframes mobile-drawer-in {
+  from { transform: translateX(-100%) }
+  to { transform: translateX(0) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu-backdrop,
+  .mobile-menu {
+    animation-duration: 1ms;
   }
 }
