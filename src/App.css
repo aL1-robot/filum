@@ -4598,6 +4598,140 @@ button.danger {
   }
 }
 
+.jobbar {
+  display: grid;
+  grid-template-columns: max-content max-content max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.jobbar > .job-group:first-child,
+.jobbar > .job-transport,
+.jobbar > .job-group:nth-child(3),
+.jobbar > .job-progress {
+  min-width: 0;
+  margin: 0;
+}
+
+.jobbar > .job-group:first-child {
+  grid-column: 1;
+}
+
+.jobbar > .job-transport {
+  grid-column: 2;
+  flex-wrap: nowrap;
+}
+
+.jobbar > .job-group:nth-child(3) {
+  grid-column: 3;
+  flex-wrap: nowrap;
+}
+
+.jobbar > .job-progress {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex: initial;
+  min-width: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.job-progress > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar {
+  min-width: 0;
+  gap: 4px 10px;
+}
+
+.statusbar > span:not(.status-dot, .status-message, .statusbar-detail) {
+  white-space: nowrap;
+}
+
+.status-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1250px) and (min-width: 761px) {
+  .jobbar {
+    grid-template-columns: max-content max-content minmax(0, 1fr);
+  }
+
+  .jobbar > .job-group:nth-child(3) {
+    grid-column: 3;
+    justify-content: flex-end;
+  }
+
+  .jobbar > .job-progress {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .jobbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .jobbar > .job-group:first-child,
+  .jobbar > .job-transport,
+  .jobbar > .job-group:nth-child(3),
+  .jobbar > .job-progress {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .jobbar > .job-group:first-child,
+  .jobbar > .job-transport,
+  .jobbar > .job-group:nth-child(3) {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding: 0;
+    border: 0;
+  }
+
+  .jobbar > .job-transport {
+    display: flex;
+  }
+
+  .jobbar > .job-transport .primary:first-child {
+    flex: 1 1 150px;
+  }
+
+  .jobbar > .job-group:nth-child(3) {
+    display: flex;
+  }
+
+  .job-progress {
+    min-width: 0;
+  }
+
+  .statusbar {
+    align-items: flex-start;
+    gap: 4px 8px;
+    padding: 8px 12px;
+  }
+
+  .statusbar > span:not(.status-dot, .status-message, .statusbar-detail) {
+    flex: 1 1 calc(100% - 24px);
+  }
+
+  .status-message {
+    flex: 1 1 100%;
+    order: 3;
+    white-space: normal;
+  }
+
+  .statusbar-detail {
+    margin-left: auto;
+  }
+}
+
 .main-canvas-wrap {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
