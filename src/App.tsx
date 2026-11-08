@@ -22,6 +22,11 @@ import {
 } from './lib/planner.ts'
 import { buildGcode, boardPath, jobBaseName, nameKey, splitRun } from './lib/gcode.ts'
 import { FluidNC, type BoardFile, type FluidEvent } from './lib/fluidnc.ts'
+import { writeClipboardText } from './platform/clipboard.ts'
+import { openTextDocument, saveTextDocument, type TextDocument } from './platform/files.ts'
+import { isTauri } from './platform/runtime.ts'
+import { loadAppPreferences, savePreference } from './platform/storage.ts'
+import NetworkSpike from './NetworkSpike.tsx'
 import {
   beginProgress,
   emptyProgress,
@@ -50,7 +55,15 @@ type AppMenuGroup = { label: string; items: AppMenuItem[] }
 
 function storedThemePreference(): ThemePreference {
   try {
-    const preference = window.localStorage.getItem(THEME_STORAGE_KEY)
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY)
+    let preference: unknown = stored
+    if (stored != null) {
+      try {
+        preference = JSON.parse(stored) as unknown
+      } catch {
+        preference = stored
+      }
+    }
     return preference === 'system' || preference === 'light' || preference === 'dark'
       ? preference
       : 'system'
@@ -197,6 +210,7 @@ function formatBytes(size: number): string {
 function App() {
   const client = useMemo(() => new FluidNC(), [])
   const [theme, setTheme] = useState<ThemePreference>(storedThemePreference)
+  const [settingsReady, setSettingsReady] = useState(false)
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [raw, setRaw] = useState<RawParams>(INITIAL.raw)
   const [anchors, setAnchors] = useState<Anchor[]>(INITIAL.anchors)
@@ -242,8 +256,38 @@ function App() {
   const [previewPaused, setPreviewPaused] = useState(false)
   const [anchorPickMode, setAnchorPickMode] = useState(false)
   const [fitRequest, setFitRequest] = useState(0)
+  const [confirmation, setConfirmation] = useState<string | null>(null)
   const primaryActionRef = useRef<() => Promise<void>>(() => Promise.resolve())
   const jogRingRef = useRef<(direction: 'out' | 'in' | 'ccw' | 'cw', shift?: boolean) => void>(() => {})
+  const confirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+  const autoConnectAttemptedRef = useRef(false)
+
+  useEffect(() => {
+    let active = true
+    void loadAppPreferences().then(preferences => {
+      if (!active) return
+      if (preferences.theme === 'system' || preferences.theme === 'light' || preferences.theme === 'dark') {
+        setTheme(preferences.theme)
+      }
+      if (preferences.measurements != null) {
+        const saved = preferences.measurements
+        const measurementsValue = saved && typeof saved === 'object' && 'm' in saved
+          ? saved.m
+          : saved
+        setMeasurements(normalizeMeasurements(measurementsValue))
+      }
+      if (typeof preferences.address === 'string') setAddress(preferences.address)
+      setSettingsReady(true)
+    }).catch(error => {
+      console.error('Unable to load saved Filum settings.', error)
+      if (active) {
+        setMessage('Could not load saved Filum settings. See the app log for details.')
+        setError(true)
+        setSettingsReady(true)
+      }
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
@@ -260,12 +304,28 @@ function App() {
   }, [theme])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme)
-    } catch (error) {
-      console.warn('Unable to save the Filum theme preference.', error)
-    }
-  }, [theme])
+    if (!settingsReady) return
+    void savePreference(THEME_STORAGE_KEY, theme).catch(error => {
+      console.error('Unable to save the Filum theme preference.', error)
+      notify('Could not save the appearance setting. See the app log for details.', true)
+    })
+  }, [theme, settingsReady])
+
+  useEffect(() => {
+    if (!settingsReady) return
+    void savePreference('needleCal1', measurements).catch(error => {
+      console.error('Unable to save Filum calibration measurements.', error)
+      notify('Could not save calibration measurements. Export a backup and see the app log.', true)
+    })
+  }, [measurements, settingsReady])
+
+  useEffect(() => {
+    if (!settingsReady) return
+    void savePreference('fluidnc-address', address).catch(error => {
+      console.error('Unable to save the FluidNC address.', error)
+      notify('Could not save the FluidNC address. See the app log for details.', true)
+    })
+  }, [address, settingsReady])
 
   useEffect(() => {
     if (!mobileMenuOpen) return
@@ -315,6 +375,70 @@ function App() {
       client.disconnect()
     }
   }, [client])
+
+  useEffect(() => {
+    if (!isTauri() || !settingsReady || window.location.pathname === '/spike' || autoConnectAttemptedRef.current) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      if (!active || autoConnectAttemptedRef.current) return
+      autoConnectAttemptedRef.current = true
+      void client.connect(address).then(reason => {
+        if (!reason) return
+        console.warn('Automatic FluidNC connection failed.', reason)
+        setMessage(`Auto-connect failed: ${reason}`)
+        setError(true)
+      }).catch(error => {
+        console.error('Automatic FluidNC connection failed.', error)
+        setMessage('Auto-connect failed. See the app log for details.')
+        setError(true)
+      })
+    }, 0)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [address, client, settingsReady])
+
+  useEffect(() => {
+    if (!isTauri() || !settingsReady) return
+    const reconnectOnResume = () => {
+      if (document.visibilityState !== 'visible' || client.connected) return
+      void client.connect(address).then(reason => {
+        if (!reason) return
+        console.warn('FluidNC reconnect on resume failed.', reason)
+        setMessage(`Reconnect failed: ${reason}`)
+        setError(true)
+      }).catch(error => {
+        console.error('FluidNC reconnect on resume failed.', error)
+        setMessage('Reconnect failed. See the app log for details.')
+        setError(true)
+      })
+    }
+    document.addEventListener('visibilitychange', reconnectOnResume)
+    return () => document.removeEventListener('visibilitychange', reconnectOnResume)
+  }, [address, client, settingsReady])
+
+  useEffect(() => {
+    if (!acting) return
+    const wakeLockNavigator = navigator as Navigator & {
+      wakeLock?: { request(type: 'screen'): Promise<{ release(): Promise<void> }> }
+    }
+    if (!wakeLockNavigator.wakeLock) return
+
+    let active = true
+    let screenLock: { release(): Promise<void> } | undefined
+    void wakeLockNavigator.wakeLock.request('screen').then(lock => {
+      if (!active) {
+        void lock.release().catch(error => console.warn('Unable to release the screen wake lock.', error))
+        return
+      }
+      screenLock = lock
+    }).catch(error => console.warn('Screen wake lock is unavailable.', error))
+    return () => {
+      active = false
+      if (screenLock) void screenLock.release().catch(error => console.warn('Unable to release the screen wake lock.', error))
+    }
+  }, [acting])
 
   useEffect(() => {
     const text = gcode
@@ -411,6 +535,34 @@ function App() {
     setError(bad)
   }
 
+  function askConfirmation(text: string): Promise<boolean> {
+    if (confirmationResolverRef.current) return Promise.resolve(false)
+    setConfirmation(text)
+    return new Promise(resolve => { confirmationResolverRef.current = resolve })
+  }
+
+  function settleConfirmation(confirmed: boolean) {
+    const resolve = confirmationResolverRef.current
+    confirmationResolverRef.current = null
+    setConfirmation(null)
+    resolve?.(confirmed)
+  }
+
+  async function saveFile(text: string, name: string, type: string) {
+    try {
+      if (isTauri()) {
+        const extension = name.split('.').at(-1) ?? 'txt'
+        const path = await saveTextDocument(name, text, extension)
+        if (path) notify(`Saved to ${path}.`)
+        return
+      }
+      downloadText(text, name, type)
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : String(reason)
+      notify(`Could not save ${name}: ${detail}`, true)
+    }
+  }
+
   function toggleMenu(menu: AppMenu) {
     setActivePopup(current => current === menu ? null : menu)
   }
@@ -425,11 +577,35 @@ function App() {
     }
   }
 
-  function openSequencePicker() {
+  async function openSequencePicker() {
     setActivePopup(null)
     setMobileMenuOpen(false)
+    if (isTauri()) {
+      try {
+        const document = await openTextDocument(['txt'])
+        if (document) loadSequence(document)
+      } catch (reason) {
+        notify(`Could not open sequence file: ${reason instanceof Error ? reason.message : String(reason)}`, true)
+      }
+      return
+    }
     const picker = document.getElementById('sequence-file-input')
     if (!(picker instanceof HTMLInputElement)) throw new Error('Sequence file picker is not available.')
+    picker.click()
+  }
+
+  async function openCalibrationPicker() {
+    if (isTauri()) {
+      try {
+        const document = await openTextDocument(['json'])
+        if (document) await importMeasurementsText(document.text)
+      } catch (reason) {
+        notify(`Could not open calibration file: ${reason instanceof Error ? reason.message : String(reason)}`, true)
+      }
+      return
+    }
+    const picker = document.getElementById('calibration-file-input')
+    if (!(picker instanceof HTMLInputElement)) throw new Error('Calibration file picker is not available.')
     picker.click()
   }
 
@@ -606,7 +782,7 @@ function App() {
       notify(`Needle is at X ${client.status.pos[0].toFixed(1)} Y ${client.status.pos[1].toFixed(1)}, not at machine home (0,0). Home the machine first; the approach move must not cross the nails.`, true)
       return
     }
-    if (!window.confirm(`Run ${plan.visits} nail visits (${(plan.length / 1000).toFixed(1)} m of thread, about ${(plan.length / plan.p.f).toFixed(0)} min)?\n\nThe needle moves to the ring and pauses so you can attach the thread. Stop at any time with Stop or Esc.${plan.warnings.length ? `\n\nWarnings are showing: ${plan.warnings.length}` : ''}`)) return
+    if (!await askConfirmation(`Run ${plan.visits} nail visits (${(plan.length / 1000).toFixed(1)} m of thread, about ${(plan.length / plan.p.f).toFixed(0)} min)?\n\nThe needle moves to the ring and pauses so you can attach the thread. Stop at any time with Stop or Esc.${plan.warnings.length ? `\n\nWarnings are showing: ${plan.warnings.length}` : ''}`)) return
     const split = splitRun(gcode)
     if (!split) {
       notify('G-code has no M0 thread-attach pause.', true)
@@ -695,7 +871,7 @@ function App() {
     }
     const expected = new Blob([gcode]).size
     const matches = size === expected
-    if (!window.confirm(`Start /${file} from the SD card (${formatBytes(size)})? The board will pause at M0 for thread attachment.${matches ? '' : `\n\nWARNING: file size differs from the current plan (${formatBytes(expected)}).`}`)) return
+    if (!await askConfirmation(`Start /${file} from the SD card (${formatBytes(size)})? The board will pause at M0 for thread attachment.${matches ? '' : `\n\nWARNING: file size differs from the current plan (${formatBytes(expected)}).`}`)) return
     if (file === boardName) {
       setProgress(current => beginProgress(current, plan.mp, gcode, size))
     }
@@ -717,14 +893,14 @@ function App() {
     const locationWarning = client.status.pos && Math.hypot(...client.status.pos) > 2
       ? '\n\nThe needle is not at machine home (0,0). Home it first if this file starts from home.'
       : ''
-    if (!window.confirm(`Run /${file.name} from the SD card?${locationWarning}`)) return
+    if (!await askConfirmation(`Run /${file.name} from the SD card?${locationWarning}`)) return
     client.runFile(boardPath(file.name))
     notify(`Started /${file.name} on the board.`)
     setRunMessage(`Board file running: ${file.name}`)
   }
 
   async function deleteBoardFile(file: BoardFile) {
-    if (!client.connected || busyWithBoard || !window.confirm(`Delete /${file.name} from the SD card?`)) return
+    if (!client.connected || busyWithBoard || !await askConfirmation(`Delete /${file.name} from the SD card?`)) return
     const ok = await client.deleteFile(boardPath(file.name))
     notify(ok ? `Deleted /${file.name}.` : `Could not delete /${file.name}.`, !ok)
     await refreshFiles()
@@ -755,7 +931,7 @@ function App() {
 
   async function home(command: '$H' | '$HX' | '$HY', label: string) {
     if (!connected || acting || busyWithBoard || client.running) return
-    if (!window.confirm(`Home ${label}? The needle moves toward the limit switch${command === '$H' ? 'es' : ''}. Clear the path first.`)) return
+    if (!await askConfirmation(`Home ${label}? The needle moves toward the limit switch${command === '$H' ? 'es' : ''}. Clear the path first.`)) return
     setActing(true)
     notify(`Homing ${label}...`)
     try {
@@ -769,26 +945,46 @@ function App() {
     }
   }
 
-  function importMeasurements(file?: File) {
+  async function importMeasurements(file?: File) {
     if (!file) return
-    void file.text().then(text => {
+    try {
+      await importMeasurementsText(await file.text())
+    } catch (reason) {
+      notify(`Could not import calibration: ${reason instanceof Error ? reason.message : String(reason)}`, true)
+    }
+  }
+
+  async function importMeasurementsText(text: string) {
+    try {
       const data: unknown = JSON.parse(text)
       if (!data || typeof data !== 'object' || !('m' in data)) throw new Error('Not a calibration file')
       const imported = normalizeMeasurements((data as { m: unknown }).m)
       setMeasurements(imported)
       notify(`Imported ${Object.keys(imported).length} nail measurements.`)
-    }).catch(reason => {
+    } catch (reason) {
       notify(`Could not import calibration: ${reason instanceof Error ? reason.message : String(reason)}`, true)
-    })
+    }
   }
 
-  function handleSequenceFile(file?: File) {
+  async function clearMeasurements() {
+    if (!await askConfirmation('Delete all recorded nail positions?')) return
+    setMeasurements({})
+    notify('Cleared calibration measurements.')
+  }
+
+  function loadSequence(document: TextDocument) {
+    setSequence(document.text)
+    setFileName(jobBaseName(document.name))
+    notify(`Loaded sequence from ${document.name}.`)
+  }
+
+  async function handleSequenceFile(file?: File) {
     if (!file) return
-    void file.text().then(text => {
-      setSequence(text)
-      setFileName(jobBaseName(file.name))
-      notify(`Loaded sequence from ${file.name}.`)
-    }).catch(reason => notify(`Could not read sequence file: ${String(reason)}`, true))
+    try {
+      loadSequence({ text: await file.text(), name: file.name })
+    } catch (reason) {
+      notify(`Could not read sequence file: ${String(reason)}`, true)
+    }
   }
 
   function updateField(key: keyof RawParams, event: React.ChangeEvent<HTMLInputElement>) {
@@ -797,10 +993,11 @@ function App() {
 
   async function copyGcode() {
     try {
-      await navigator.clipboard.writeText(gcode)
+      await writeClipboardText(gcode)
       setRunMessage('G-code copied to clipboard.')
-    } catch {
-      setRunMessage('Clipboard access was denied. Select and copy the G-code text below.')
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : String(reason)
+      setRunMessage(`Clipboard access failed: ${detail}. Select and copy the G-code text below.`)
     }
   }
 
@@ -879,6 +1076,10 @@ function App() {
   const firstRingNail = firstSequenceNail == null
     ? null
     : ((firstSequenceNail - plan.p.ib + plan.p.so) % plan.p.n) + plan.p.ib
+
+  if (window.location.pathname === '/spike' || new URLSearchParams(window.location.search).has('spike')) {
+    return <NetworkSpike address={address} />
+  }
 
   return (
     <div className="app-shell">
@@ -980,6 +1181,17 @@ function App() {
         accept=".txt"
         onChange={event => {
           handleSequenceFile(event.currentTarget.files?.[0])
+          event.currentTarget.value = ''
+        }}
+      />
+      <input
+        id="calibration-file-input"
+        className="sr-only"
+        type="file"
+        aria-label="Import calibration"
+        accept=".json,application/json"
+        onChange={event => {
+          void importMeasurements(event.currentTarget.files?.[0])
           event.currentTarget.value = ''
         }}
       />
@@ -1125,13 +1337,9 @@ function App() {
               </div>
             </div>
             <div className="inline-actions calibration-files">
-              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export calibration</button>
-              <label className="file-button" title="Load nail positions from a JSON calibration file.">Import<input type="file" title="Choose a JSON file containing saved nail measurements." accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
-              <button className="danger" title="Delete all saved nail measurements." onClick={() => {
-                if (!window.confirm('Delete all recorded nail positions?')) return
-                setMeasurements({})
-                notify('Cleared calibration measurements.')
-              }}>Clear all</button>
+              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => void saveFile(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export calibration</button>
+              <button className="file-button" title="Load nail positions from a JSON calibration file." onClick={() => void openCalibrationPicker()}>Import</button>
+              <button className="danger" title="Delete all saved nail measurements." onClick={() => void clearMeasurements()}>Clear all</button>
             </div>
             <p className={`message ${error ? 'error' : ''}`} role="status">{message}</p>
             <p className="keyboard-hint">Enter go / record · arrows jog XY · W/S radial · A/D along ring · Shift ×10 · [ ] step · Esc stop</p>
@@ -1140,7 +1348,7 @@ function App() {
       </main>
       <footer className="jobbar" aria-label="Job controls">
         <div className="job-group">
-          <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
+          <button title="Download the generated toolpath as a G-code file." onClick={() => void saveFile(gcode, boardName, 'text/plain')}>Save G-code</button>
           <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
         </div>
         <div className="job-transport">
@@ -1357,13 +1565,9 @@ function App() {
             <div className="inline-actions">
               <button title="Move the three anchors back to their calculated ideal locations." onClick={resetAnchors}>Reset anchors to ideal</button>
               <button title="Calculate and apply the nail axis radius from the measured anchor circle." onClick={fitRadiusToAnchors}>Set nail radius from anchors</button>
-              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => downloadText(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export measurements</button>
-              <label className="file-button" title="Load nail positions from a JSON calibration file.">Import measurements<input type="file" title="Choose a JSON file containing saved nail measurements." accept=".json,application/json" onChange={event => importMeasurements(event.target.files?.[0])} /></label>
-              <button className="danger" title="Delete all saved nail measurements." onClick={() => {
-                if (!window.confirm('Delete all recorded nail positions?')) return
-                setMeasurements({})
-                notify('Cleared calibration measurements.')
-              }}>Clear measurements</button>
+              <button title="Download the recorded nail positions as a JSON calibration file." onClick={() => void saveFile(JSON.stringify({ n: plan.p.n, ib: plan.p.ib, m: measurements }, null, 2), 'nail_calibration.json', 'application/json')}>Export measurements</button>
+              <button className="file-button" title="Load nail positions from a JSON calibration file." onClick={() => void openCalibrationPicker()}>Import measurements</button>
+              <button className="danger" title="Delete all saved nail measurements." onClick={() => void clearMeasurements()}>Clear measurements</button>
             </div>
             <p className="calibration-result">
               Fit residual: <b>{Number.isNaN(plan.cal.res) ? 'n/a' : `${plan.cal.res.toFixed(2)} mm`}</b>
@@ -1394,6 +1598,17 @@ function App() {
             <li>Green marks show calibration anchors and measured nail offsets.</li>
           </ul>
           <p className="hint">Only use machine controls when the bed is clear and the machine is safe to move.</p>
+        </div>
+      </AppDialog>
+      <AppDialog
+        open={confirmation !== null}
+        title="Confirm machine action"
+        onClose={() => settleConfirmation(false)}
+      >
+        <p className="confirmation-message">{confirmation}</p>
+        <div className="inline-actions confirmation-actions">
+          <button onClick={() => settleConfirmation(false)}>Cancel</button>
+          <button className="danger" onClick={() => settleConfirmation(true)}>Continue</button>
         </div>
       </AppDialog>
       <footer className={`statusbar ${error ? 'error' : ''}`} role="status" aria-live="polite">

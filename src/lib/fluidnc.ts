@@ -4,6 +4,7 @@
  */
 
 import { nameKey } from './gcode.ts'
+import { boardSocketAttempts, boardURL, createBoardTransport, type BoardSocket } from '../platform/net.ts'
 
 export type MachineStatus = {
   connected: boolean
@@ -47,72 +48,16 @@ type RunState = {
 
 const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms) })
 
-function openSocket(url: string, protocol?: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    let ws: WebSocket
-    try {
-      ws = protocol ? new WebSocket(url, protocol) : new WebSocket(url)
-    } catch {
-      reject(new Error('open'))
-      return
-    }
-    const timer = setTimeout(() => {
-      ws.close()
-      reject(new Error('timeout'))
-    }, 2500)
-    ws.binaryType = 'arraybuffer'
-    ws.onopen = () => {
-      clearTimeout(timer)
-      ws.onerror = null
-      resolve(ws)
-    }
-    ws.onerror = () => {
-      clearTimeout(timer)
-      ws.close()
-      reject(new Error('error'))
-    }
-  })
-}
-
-export function boardURL(address: string): URL {
-  const v = address.trim()
-  return new URL(/:\/\//.test(v) ? v : 'http://' + v)
-}
-
 function httpDetail(status: number | undefined, err: string | undefined): string {
   if (err) return err
   if (status) return 'HTTP ' + status
   return ''
 }
 
-type TauriFetch = (url: string, init: { method: string; body: FormData }) => Promise<{ ok: boolean; status: number }>
-
-function tauriFetch(): TauriFetch | undefined {
-  const host = globalThis as { __TAURI__?: { http?: { fetch?: TauriFetch } } }
-  return host.__TAURI__?.http?.fetch
-}
-
-async function postUpload(url: string, body: FormData): Promise<{ ok: boolean; status?: number; err?: string }> {
-  const viaTauri = tauriFetch()
-  if (viaTauri) {
-    try {
-      const response = await viaTauri(url, { method: 'POST', body })
-      return { ok: response.ok, status: response.status }
-    } catch (error) {
-      return { ok: false, err: String(error instanceof Error ? error.message : error) }
-    }
-  }
-  try {
-    await fetch(url, { method: 'POST', body, mode: 'no-cors' })
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, err: String(error instanceof Error ? error.message : error) }
-  }
-}
-
 export class FluidNC {
   status: MachineStatus = { connected: false, state: '-', pos: null, sd: null }
-  private ws: WebSocket | null = null
+  private readonly transport = createBoardTransport()
+  private ws: BoardSocket | null = null
   private wco: [number, number, number] = [0, 0, 0]
   private queue: QueueItem[] = []
   private busy = false
@@ -182,20 +127,12 @@ export class FluidNC {
     } catch {
       return 'Invalid address'
     }
-    const port = Number(url.port) || 80
-    const host = url.hostname
-    const attempts: [string, string | undefined][] = [
-      [`ws://${host}:${port}/`, 'webui-v3'],
-      [`ws://${host}:${port + 1}/`, undefined],
-      [`ws://${host}:${port + 2}/`, 'webui-v3'],
-      [`ws://${host}:${port}/ws`, undefined],
-    ]
-    let ws: WebSocket | null = null
+    let ws: BoardSocket | null = null
     const tried: string[] = []
-    for (const [target, protocol] of attempts) {
+    for (const [target, protocol] of boardSocketAttempts(url)) {
       tried.push(target)
       try {
-        ws = await openSocket(target, protocol)
+        ws = await this.transport.openSocket(target, protocol)
         break
       } catch {
         /* try the next FluidNC port / protocol */
@@ -303,7 +240,7 @@ export class FluidNC {
     const tick = setInterval(() => { onTick?.(Math.round((Date.now() - started) / 1000)) }, 400)
     let http: { ok: boolean; status?: number; err?: string }
     try {
-      http = await postUpload(origin + '/upload', body)
+      http = await this.transport.postMultipart(origin + '/upload', body, 600_000)
     } finally {
       clearInterval(tick)
       this.uploading = false
