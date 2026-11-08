@@ -4,7 +4,14 @@
  */
 
 import { nameKey } from './gcode.ts'
-import { boardSocketAttempts, boardURL, createBoardTransport, type BoardSocket } from '../platform/net.ts'
+import {
+  boardSocketAttempts,
+  boardURL,
+  checkUploadResponse,
+  createBoardTransport,
+  type BoardSocket,
+  type UploadResponse,
+} from '../platform/net.ts'
 
 export type MachineStatus = {
   connected: boolean
@@ -18,8 +25,9 @@ export type BoardFile = { name: string; size: number }
 export type UploadResult =
   | { kind: 'verified'; name: string; size: number }
   | { kind: 'unverified'; name: string; size: number; httpOk: boolean; detail: string }
-  | { kind: 'missing'; name: string; httpOk: boolean; detail: string; listing: BoardFile[]; onFlash: boolean }
+  | { kind: 'missing'; name: string; httpOk: boolean; detail: string; listing?: BoardFile[]; onFlash?: boolean }
   | { kind: 'incomplete'; name: string; got: number; size: number }
+  | { kind: 'size-mismatch'; name: string; got: number; size: number }
   | { kind: 'bad-address' }
 
 export type RunResult = { ok: true; lines: number } | { ok: false; reason: string }
@@ -219,8 +227,7 @@ export class FluidNC {
   }
 
   /**
-   * Multipart POST the way FluidNC expects it. A no-cors request skips the preflight the board cannot answer.
-   * The SD listing is the verification, because that response body is often unreadable.
+   * Multipart POST the way FluidNC expects it. If the response cannot be read, verify through the SD listing.
    */
   async uploadAndVerify(address: string, name: string, text: string, onTick?: (seconds: number) => void): Promise<UploadResult> {
     let origin: string
@@ -238,13 +245,20 @@ export class FluidNC {
     this.uploading = true
     const started = Date.now()
     const tick = setInterval(() => { onTick?.(Math.round((Date.now() - started) / 1000)) }, 400)
-    let http: { ok: boolean; status?: number; err?: string }
+    let http: UploadResponse
     try {
       http = await this.transport.postMultipart(origin + '/upload', body, 600_000)
     } finally {
       clearInterval(tick)
       this.uploading = false
     }
+    const responseCheck = checkUploadResponse(http, name, size)
+    if (responseCheck.kind === 'verified') return { kind: 'verified', name, size }
+    if (responseCheck.kind === 'incomplete') return { kind: 'incomplete', name, got: responseCheck.got, size }
+    if (responseCheck.kind === 'size-mismatch') return { kind: 'size-mismatch', name, got: responseCheck.got, size }
+    const detail = httpDetail(http.status, http.err)
+    if (responseCheck.kind === 'missing') return { kind: 'missing', name, httpOk: http.ok, detail }
+
     let got: number | null = null
     if (this.connected) {
       await sleep(700)
@@ -254,7 +268,6 @@ export class FluidNC {
         got = await this.fileSize(name)
       }
     }
-    const detail = httpDetail(http.status, http.err)
     if (got === size) return { kind: 'verified', name, size }
     if (got == null) return { kind: 'unverified', name, size, httpOk: http.ok, detail }
     if (got < 0) {

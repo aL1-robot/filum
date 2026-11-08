@@ -52,7 +52,7 @@ Calibration measurements, the board address, and appearance preference are persi
 
 Sequence and calibration imports use native file pickers in Tauri. G-code and calibration exports use Save dialogs; if Android's save dialog fails, Filum writes the file in its app data directory and reports that path (app data may not be directly visible in a file manager). Android file access is restricted by Tauri to app-accessible locations unless additional storage permissions are configured.
 
-Machine confirmations are in-app and require an explicit choice. Tauri uploads use the Rust HTTP plugin, preserve FluidNC's multipart fields, and retain SD-size verification; the request timeout is ten minutes. The progress bar remains animated. Screen wake lock is requested while Filum is performing an active machine action or streamed run. On return to the foreground, a disconnected controller is reconnected and the existing status-based progress tracker can reattach to an SD-card job.
+Machine confirmations are in-app and require an explicit choice. Tauri uploads use the Rust HTTP plugin and preserve FluidNC's multipart fields. Upload verification first matches the response `files` entry by name and byte size; if the response is unavailable or unreadable, Filum falls back to checking `$SD/List`. The request timeout is ten minutes. The progress bar remains animated. Screen wake lock is requested while Filum is performing an active machine action or streamed run. On return to the foreground, a disconnected controller is reconnected and the existing status-based progress tracker can reattach to an SD-card job.
 
 ### Renaming Filum
 

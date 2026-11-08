@@ -3315,6 +3315,10 @@ body {
   font-size: 12px;
 }
 
+.job-progress .upload-verified {
+  color: #239667;
+}
+
 .toast {
   min-height: 34px;
   font-size: 12px;

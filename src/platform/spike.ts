@@ -1,6 +1,8 @@
 import {
+  boardFileNameKey,
   boardSocketAttempts,
   boardURL,
+  checkUploadResponse,
   createBoardTransport,
   type BoardTransportKind,
 } from './net.ts'
@@ -78,12 +80,30 @@ async function testTransport(address: string, transport: BoardTransportKind, log
     const response = await boardTransport.postMultipart(`${url.origin}/upload`, body, 600_000)
     log(`  upload response: ${response.status ?? (response.ok ? 'opaque/sent' : 'failed')}${response.err ? ` (${response.err})` : ''}`)
 
-    start = lines.length
-    socket.send('$SD/List\n')
-    await waitForLine(lines, start, line => /^ok\b/.test(line), 30_000)
-    const uploaded = lines.slice(start).find(line => line.includes(filename) && line.includes(`SIZE: ${size}`))
-    if (uploaded) log(`  upload verified: ${uploaded}`)
-    else log(`  upload not verified in SD listing; check manually for /${filename}`)
+    const responseCheck = checkUploadResponse(response, filename, size)
+    if (responseCheck.kind === 'verified') {
+      log(`  /${filename} matches the plan (${size} bytes).`)
+    } else if (responseCheck.kind === 'incomplete') {
+      log(`  INCOMPLETE: ${responseCheck.got} of ${size} bytes reached the SD card.`)
+    } else if (responseCheck.kind === 'size-mismatch') {
+      log(`  SIZE MISMATCH: ${responseCheck.got} bytes uploaded; expected ${size}.`)
+    } else if (responseCheck.kind === 'missing') {
+      log(`  /${filename} was not found in the upload response.`)
+    } else {
+      start = lines.length
+      socket.send('$SD/List\n')
+      await waitForLine(lines, start, line => /^ok\b/.test(line), 30_000)
+      const listing = lines.slice(start)
+      const uploadedLine = listing.find(line => {
+        const file = /^\[FILE:\s*(.+?)\s*\|\s*SIZE:\s*(\d+)/i.exec(line)
+        return file && boardFileNameKey(file[1]) === boardFileNameKey(filename)
+      })
+      const uploadedFile = uploadedLine && /^\[FILE:\s*(.+?)\s*\|\s*SIZE:\s*(\d+)/i.exec(uploadedLine)
+      if (!uploadedFile) log(`  ${filename} was not found on the SD card.`)
+      else if (Number(uploadedFile[2]) === size) log(`  /${filename} matches the plan (${size} bytes) via $SD/List.`)
+      else if (Number(uploadedFile[2]) < size) log(`  INCOMPLETE: ${uploadedFile[2]} of ${size} bytes reached the SD card.`)
+      else log(`  SIZE MISMATCH: ${uploadedFile[2]} bytes uploaded; expected ${size}.`)
+    }
     log(`  diagnostic file left on SD card: /${filename}`)
   } finally {
     socket?.close()

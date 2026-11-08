@@ -250,6 +250,7 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const [uploadSeconds, setUploadSeconds] = useState(0)
   const [uploadInfo, setUploadInfo] = useState('')
+  const [uploadVerified, setUploadVerified] = useState(false)
   const [showDoneOnly, setShowDoneOnly] = useState(false)
   const [visibleVisits, setVisibleVisits] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -813,24 +814,33 @@ function App() {
     if (uploading || client.sdBusy()) return
     setUploading(true)
     setUploadSeconds(0)
+    setUploadVerified(false)
     setUploadInfo(`Uploading /${boardName}...`)
     notify(`Uploading /${boardName}...`)
     try {
       const result = await client.uploadAndVerify(address, boardName, gcode, setUploadSeconds)
       if (result.kind === 'verified') {
-        setUploadInfo(`Verified /${result.name} on the SD card (${formatBytes(result.size)}).`)
-        notify(`Uploaded and verified /${result.name}.`)
+        setUploadVerified(true)
+        setUploadInfo(`/${result.name} matches the plan (${formatBytes(result.size)}).`)
+        notify(`Uploaded /${result.name}; size matches the plan.`)
       } else if (result.kind === 'unverified') {
         setUploadInfo(`Uploaded but not verified: connect to FluidNC and retry. ${result.detail}`)
         notify('Upload not verified: the SD card could not be checked.', true)
       } else if (result.kind === 'missing') {
-        const list = result.listing.length ? ` SD card files: ${result.listing.slice(0, 6).map(file => file.name).join(', ')}.` : ' The SD listing was empty.'
+        const list = result.listing
+          ? result.listing.length
+            ? ` SD card files: ${result.listing.slice(0, 6).map(file => file.name).join(', ')}.`
+            : ' The SD listing was empty.'
+          : ''
         const flash = result.onFlash ? ' The file may have been written to board flash, not the SD card.' : ''
         setUploadInfo(`${result.name} was not found on the SD card.${list}${flash}`)
         notify('Upload failed: file not found on the SD card.', true)
       } else if (result.kind === 'incomplete') {
         setUploadInfo(`INCOMPLETE: ${formatBytes(result.got)} of ${formatBytes(result.size)} reached the SD card. Do not start it; upload again.`)
         notify('Upload incomplete. Do not start this file.', true)
+      } else if (result.kind === 'size-mismatch') {
+        setUploadInfo(`SIZE MISMATCH: ${formatBytes(result.got)} uploaded; expected ${formatBytes(result.size)}. Do not start it; upload again.`)
+        notify('Upload size did not match the plan. Do not start this file.', true)
       } else {
         setUploadInfo('Invalid FluidNC address.')
         notify('Invalid FluidNC address.', true)
@@ -1365,7 +1375,7 @@ function App() {
         {(runMessage || uploadInfo || uploading) && (
           <div className="job-progress" role="status" aria-live="polite">
             {runMessage && <span>{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}</span>}
-            {uploadInfo && <span>{uploadInfo}</span>}
+            {uploadInfo && <span className={uploadVerified ? 'upload-verified' : undefined}>{uploadInfo}</span>}
             {uploading && <span>Uploading… {uploadSeconds}s</span>}
             {uploading && <div className="progress-track"><i className="indeterminate" /></div>}
           </div>

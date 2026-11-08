@@ -188,7 +188,52 @@ export function openBoardSocket(
   })
 }
 
-export type UploadResponse = { ok: boolean; status?: number; err?: string }
+export type UploadResponse = { ok: boolean; status?: number; err?: string; body?: string | null }
+export type UploadResponseCheck =
+  | { kind: 'verified' }
+  | { kind: 'incomplete'; got: number }
+  | { kind: 'missing' }
+  | { kind: 'size-mismatch'; got: number }
+  | { kind: 'fallback' }
+
+export function boardFileNameKey(name: string): string {
+  return name.replace(/^\/+/, '').toLowerCase()
+}
+
+export function checkUploadResponse(
+  response: UploadResponse,
+  name: string,
+  expectedSize: number,
+): UploadResponseCheck {
+  if (response.body == null || !response.body.trim()) return { kind: 'fallback' }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(response.body)
+  } catch {
+    return { kind: 'fallback' }
+  }
+  if (payload == null || typeof payload !== 'object' || !('files' in payload) || !Array.isArray(payload.files)) {
+    return { kind: 'fallback' }
+  }
+
+  const uploaded = payload.files.find(
+    (file): file is { name: string; size: string } =>
+      file != null &&
+      typeof file === 'object' &&
+      'name' in file &&
+      typeof file.name === 'string' &&
+      boardFileNameKey(file.name) === boardFileNameKey(name),
+  )
+  if (!uploaded) return { kind: 'missing' }
+  if (typeof uploaded.size !== 'string' || !/^\d+$/.test(uploaded.size)) return { kind: 'fallback' }
+
+  const got = Number(uploaded.size)
+  if (!Number.isSafeInteger(got)) return { kind: 'fallback' }
+  if (got === expectedSize) return { kind: 'verified' }
+  if (got < expectedSize) return { kind: 'incomplete', got }
+  return { kind: 'size-mismatch', got }
+}
 
 export async function postMultipart(
   url: string,
@@ -208,14 +253,14 @@ export async function postMultipart(
         signal: controller.signal,
         connectTimeout: timeoutMs,
       })
-      return { ok: response.ok, status: response.status }
+      return { ok: response.ok, status: response.status, body: await response.text() }
     }
 
     try {
       const response = await fetch(url, { method: 'POST', body, mode: 'no-cors', signal: controller.signal })
       return response.type === 'opaque'
         ? { ok: true }
-        : { ok: response.ok, status: response.status }
+        : { ok: response.ok, status: response.status, body: await response.text() }
     } catch (error) {
       return { ok: false, err: String(error instanceof Error ? error.message : error) }
     }
