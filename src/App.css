@@ -102,6 +102,14 @@
   border-top: 1px solid var(--border);
 }
 
+.machine-config-group h4 {
+  margin: 0;
+  padding: 9px 0;
+  color: var(--heading);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .field-group summary,
 .board-files > summary,
 .gcode-details > summary {

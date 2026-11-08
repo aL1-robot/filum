@@ -1306,16 +1306,8 @@ function App() {
               <div><h3>Machine configuration</h3><p>Set the planner's machine geometry and movement calibration.</p></div>
             </div>
             {FIELD_GROUPS.filter(group => group.title === 'Machine and nudge').map(group => (
-              <details
-                key={group.title}
-                open={fieldGroupsOpen[group.title]}
-                className="field-group"
-                onToggle={event => {
-                  const open = event.currentTarget.open
-                  setFieldGroupsOpen(current => current[group.title] === open ? current : { ...current, [group.title]: open })
-                }}
-              >
-                <summary title={`Show or hide ${group.title.toLowerCase()} settings.`}>{group.title}</summary>
+              <div key={group.title} className="field-group machine-config-group">
+                <h4>{group.title}</h4>
                 <div className="field-grid">
                   {group.fields.map(field => (
                     <label key={field.key} className={field.check ? 'check-field' : 'number-field'}>
@@ -1332,7 +1324,7 @@ function App() {
                     </label>
                   ))}
                 </div>
-              </details>
+              </div>
             ))}
           </section>
           <section className="dialog-section calibration-dialog-content" hidden={activeDialog !== 'anchors'}>
