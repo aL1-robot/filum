@@ -11,6 +11,7 @@ import {
   idealAnchors,
   normalizeMeasurements,
   prepare,
+  polylineLength,
   refineQueue,
   ringDirection,
   startingPoint,
@@ -30,18 +31,20 @@ import {
   stepProgress,
   type Progress,
 } from './lib/progress.ts'
-import PlannerCanvas from './PlannerCanvas.tsx'
+import PlannerCanvas, { PlannerLocalView } from './PlannerCanvas.tsx'
 import './App.css'
 
 const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 5]
 const INITIAL = startingPoint()
 const THEME_STORAGE_KEY = 'filum-theme'
 type ThemePreference = 'system' | 'light' | 'dark'
-type AppMenu = 'file' | 'settings' | 'help'
+type AppMenu = 'file' | 'settings' | 'view' | 'machine' | 'help'
+type AppAction = 'fit' | 'toggle-done' | 'play' | 'connect' | 'home' | 'stop'
 type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help'
 type AppMenuItem = { label: string; title?: string } & (
   | { dialog: AppDialogView; action?: never }
   | { action: 'open-sequence'; dialog?: never }
+  | { action: AppAction; dialog?: never }
 )
 type AppMenuGroup = { label: string; items: AppMenuItem[] }
 
@@ -50,10 +53,10 @@ function storedThemePreference(): ThemePreference {
     const preference = window.localStorage.getItem(THEME_STORAGE_KEY)
     return preference === 'system' || preference === 'light' || preference === 'dark'
       ? preference
-      : 'light'
+      : 'system'
   } catch (error) {
     console.warn('Unable to read the saved Filum theme preference.', error)
-    return 'light'
+    return 'system'
   }
 }
 
@@ -67,11 +70,28 @@ const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
   ],
   file: [
     { label: 'Project', items: [
-      { label: 'Open sequence…', action: 'open-sequence', title: 'Choose a sequence file to load into the planner.' },
+      { label: 'Open sequence…', action: 'open-sequence', title: 'Choose a .txt sequence file to load into the planner.' },
       { label: 'Nail sequence', dialog: 'sequence' },
       { label: 'G-code job', dialog: 'gcode' },
     ] },
     { label: 'Controller', items: [{ label: 'Board files', dialog: 'boardFiles' }] },
+  ],
+  view: [{ label: 'Toolpath', items: [
+    { label: 'Fit view', action: 'fit', title: 'Fit the full machine bed in the map.' },
+    { label: 'Done lines only', action: 'toggle-done', title: 'Show only thread lines the needle has finished.' },
+    { label: 'Play toolpath', action: 'play', title: 'Animate the thread path from the first visit to the last.' },
+  ] }],
+  machine: [
+    { label: 'Controller', items: [
+      { label: 'Connect / disconnect', action: 'connect', title: 'Connect to or disconnect from FluidNC.' },
+      { label: 'Board files', dialog: 'boardFiles' },
+    ] },
+    { label: 'Machine setup', items: [
+      { label: 'Machine configuration', dialog: 'machineConfig' },
+      { label: 'Calibration anchors', dialog: 'anchors' },
+      { label: 'Home all axes', action: 'home' },
+      { label: 'Stop motion', action: 'stop' },
+    ] },
   ],
   help: [{ label: 'Help', items: [{
     label: 'Keyboard shortcuts and notes',
@@ -80,12 +100,13 @@ const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
   }] }],
 }
 
-const APP_MENUS: AppMenu[] = ['file', 'settings', 'help']
+const APP_MENUS: AppMenu[] = ['file', 'settings', 'view', 'machine', 'help']
 
 function renderMenuItems(
   menu: AppMenu,
   onSelect: (dialog: AppDialogView) => void,
   onOpenSequence: () => void,
+  onAction: (action: AppAction) => void,
 ) {
   return APP_MENU_GROUPS[menu].map((group, groupIndex) => (
     <div className="menu-group" key={group.label}>
@@ -97,8 +118,9 @@ function renderMenuItems(
           key={item.dialog ?? item.action}
           title={item.title ?? `Open ${item.label.toLowerCase()}.`}
           onClick={() => {
-            if ('action' in item && item.action === 'open-sequence') onOpenSequence()
-            else if ('dialog' in item) onSelect(item.dialog)
+            if (item.action === 'open-sequence') onOpenSequence()
+            else if (item.action) onAction(item.action)
+            else if (item.dialog) onSelect(item.dialog)
           }}
         >{item.label}</button>
       ))}
@@ -183,6 +205,7 @@ function App() {
   const [activePopup, setActivePopup] = useState<AppMenu | null>(null)
   const [activeDialog, setActiveDialog] = useState<AppDialogView | null>(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [previewSidebarOpen, setPreviewSidebarOpen] = useState(true)
   const [pickedAnchor, setPickedAnchor] = useState<number | null>(null)
   const [sequence, setSequence] = useState(INITIAL.sequence)
   const [measurements, setMeasurements] = useState<Measurements>({})
@@ -819,6 +842,23 @@ function App() {
     notify(`Nail axis radius set to ${base.toFixed(2)} mm from the anchor circle.`)
   }
 
+  function runMenuAction(action: AppAction) {
+    if (action === 'fit') setFitRequest(value => value + 1)
+    else if (action === 'toggle-done') setShowDoneOnly(value => !value)
+    else if (action === 'play') { setVisibleVisits(0); setPlaying(true) }
+    else if (action === 'connect') void connect()
+    else if (action === 'home') void home('$H', 'all axes')
+    else if (action === 'stop') stopMachine()
+  }
+
+  const firstSequenceNail = sequence
+    .split(/[\s,;]+/)
+    .map(Number)
+    .find(nail => Number.isInteger(nail) && nail >= plan.p.ib && nail < plan.p.ib + plan.p.n)
+  const firstRingNail = firstSequenceNail == null
+    ? null
+    : ((firstSequenceNail - plan.p.ib + plan.p.so) % plan.p.n) + plan.p.ib
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -845,7 +885,7 @@ function App() {
               >{menu[0].toUpperCase() + menu.slice(1)}</button>
               {activePopup === menu && (
                 <div className="menu-popup" role="menu">
-                  {renderMenuItems(menu, openDialog, openSequencePicker)}
+                  {renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction)}
                 </div>
               )}
             </div>
@@ -863,10 +903,11 @@ function App() {
         >
           <span /><span /><span />
         </button>
-        <span className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}.` : 'Not connected to FluidNC.'}>
+        <button className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}. Click to disconnect.` : 'Not connected to FluidNC. Click to connect.'} onClick={() => void connect()}>
           <i />
-          {connected ? machineStatus.state : 'Not connected'}
-        </span>
+          {connected ? machineStatus.state : 'Connect'}
+        </button>
+        <button className="top-stop-button" title="Stop motion and reset the controller." disabled={!connected} onClick={stopMachine}>■ <span>Stop</span></button>
       </header>
       {mobileMenuOpen && (
         <div className="mobile-menu-backdrop" onClick={() => { setMobileMenuOpen(false); setActivePopup(null) }}>
@@ -903,7 +944,7 @@ function App() {
                   <span>{menu[0].toUpperCase() + menu.slice(1)}</span>
                   <span className="mobile-menu-chevron" aria-hidden="true">{activePopup === menu ? '▴' : '▾'}</span>
                 </button>
-                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog, openSequencePicker)}</div>}
+                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction)}</div>}
               </section>
             ))}
           </nav>
@@ -914,8 +955,8 @@ function App() {
         className="sr-only"
         type="file"
         aria-label="Open sequence file"
-        title="Choose a text, CSV, NC, or G-code file containing the nail visit sequence."
-        accept=".txt,.csv,.nc,.gcode"
+        title="Choose a .txt file containing the nail visit sequence."
+        accept=".txt"
         onChange={event => {
           handleSequenceFile(event.currentTarget.files?.[0])
           event.currentTarget.value = ''
@@ -926,20 +967,25 @@ function App() {
         <section className="planner-column">
           <section className="planner-panel">
             <div className="section-heading">
-              <div>
-                <h2>Toolpath</h2>
-                <p>{progressLabel({ ...progress, show: showDoneOnly })}</p>
-              </div>
+              <h2 className="sr-only">Toolpath</h2>
               <div className="inline-actions">
-                <button title="During a run, show only thread lines the needle has finished." onClick={() => setShowDoneOnly(value => !value)} className={showDoneOnly ? 'selected' : ''}>Done lines only</button>
                 <button title="Fit the full machine bed in the map. Double-click the map for the same action." onClick={() => setFitRequest(value => value + 1)}>Fit view</button>
+                <button title="During a run, show only thread lines the needle has finished." onClick={() => setShowDoneOnly(value => !value)} className={showDoneOnly ? 'selected' : ''}>Done lines only</button>
+                <span className="progress-label">{progressLabel({ ...progress, show: showDoneOnly })}</span>
+                <input
+                  type="range"
+                  title="Scrub through the nail visits to reveal the toolpath up to that point."
+                  min={0}
+                  max={plan.visits}
+                  value={visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)}
+                  onChange={event => {
+                    setPlaying(false)
+                    setVisibleVisits(Number(event.target.value))
+                  }}
+                />
+                <span className="visit-count">{visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)} / {plan.visits}</span>
                 <button title="Animate the thread path from the first visit to the last." onClick={() => { setVisibleVisits(0); setPlaying(true) }}>{playing ? 'Playing…' : '▶ Play'}</button>
               </div>
-            </div>
-            <div className="path-legend" aria-label="Toolpath legend">
-              <span><i className="thread-line" />Thread path</span>
-              <span><i className="approach-line" />Approach from home</span>
-              <span><i className="exit-line" />Return to home</span>
             </div>
             <PlannerCanvas
               plan={plan}
@@ -954,35 +1000,37 @@ function App() {
               onAnchorPoint={setAnchorPoint}
               pickingAnchor={anchorPickMode}
               fitRequest={fitRequest}
+              previewSidebarOpen={previewSidebarOpen}
+              onTogglePreviewSidebar={() => setPreviewSidebarOpen(open => !open)}
+              previewSidebar={
+                <>
+                  <section className="summary-section local-summary">
+                    <h2>Local view</h2>
+                    <PlannerLocalView plan={plan} />
+                  </section>
+                  <section className="summary-section">
+                    {plan.warnings.length > 0 && (
+                      <div className="warnings">{plan.warnings.map((warning, index) => <p key={index}>⚠ {warning}</p>)}</div>
+                    )}
+                    <h2>Plan summary</h2>
+                    <div className="plan-summary">
+                      <p><b>{plan.visits}</b> nail visits, thread path <b>{(plan.length / 1000).toFixed(1)} m</b>, about <b>{(plan.length / plan.p.f).toFixed(0)} min</b> at {plan.p.f} mm/min</p>
+                      <p>Pull-down moves: <b>{plan.pullDowns}</b> of {plan.visits} visits{plan.pullDowns === 0 ? ' (thread would lie too tangential to slide down the nail)' : ''}</p>
+                      <p>Nail ring at needle height: {plan.p.Rh.toFixed(2)} mm radius; pitch {(2 * plan.p.Rh * Math.sin(Math.PI / plan.p.n)).toFixed(2)} mm</p>
+                      {firstSequenceNail != null && firstRingNail != null && (
+                        <p>Sequence file nail {firstSequenceNail} is mounted on ring nail {firstRingNail} (file nail {firstSequenceNail} lands at {(((plan.p.ang(firstRingNail - plan.p.ib) * 180 / Math.PI + 540) % 360) - 180).toFixed(2)}°)</p>
+                      )}
+                      <p>Calibration residual: <b>{Number.isNaN(plan.cal.res) ? 'n/a' : `${plan.cal.res.toFixed(2)} mm`}</b></p>
+                      <p>Anchor circle radius {Number.isNaN(plan.cal.rc) ? 'n/a' : `${plan.cal.rc.toFixed(2)} mm`} vs expected {(plan.p.Rh + plan.p.cu).toFixed(2)} mm</p>
+                      <p>Needle gap to nails, CCW loop <b>{plan.ccw.gap.toFixed(2)} mm</b>, CW loop <b>{plan.cw.gap.toFixed(2)} mm</b></p>
+                      <p>Outer track radius {(plan.p.Rh + plan.p.lout + 3).toFixed(2)} mm, inner {(plan.p.Rh - plan.p.lin).toFixed(2)} mm</p>
+                      <p>Approach from home <b>{(polylineLength([[0, 0], ...plan.route]) / 1000).toFixed(2)} m</b> (pauses at M0 for thread), return to home <b>{(polylineLength(plan.exit) / 1000).toFixed(2)} m</b></p>
+                      <p>{measuredCount} nails measured</p>
+                    </div>
+                  </section>
+                </>
+              }
             />
-            <div className="visit-slider">
-              <input
-                type="range"
-                title="Scrub through the nail visits to reveal the toolpath up to that point."
-                min={0}
-                max={plan.visits}
-                value={visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)}
-                onChange={event => {
-                  setPlaying(false)
-                  setVisibleVisits(Number(event.target.value))
-                }}
-              />
-              <span>{visibleVisits == null ? plan.visits : Math.min(visibleVisits, plan.visits)} / {plan.visits} visits</span>
-            </div>
-            <div className="plan-summary">
-              <div><b>{plan.visits}</b><span>nail visits</span></div>
-              <div><b>{(plan.length / 1000).toFixed(1)} m</b><span>thread length</span></div>
-              <div><b>{(plan.length / plan.p.f).toFixed(0)} min</b><span>estimated time</span></div>
-              <div><b>{measuredCount}</b><span>nails measured</span></div>
-              <p>
-                Ring radius {plan.p.Rh.toFixed(2)} mm · pitch {(2 * plan.p.Rh * Math.sin(Math.PI / plan.p.n)).toFixed(2)} mm ·
-                calibration residual {Number.isNaN(plan.cal.res) ? 'n/a' : `${plan.cal.res.toFixed(2)} mm`} ·
-                CCW/CW gap {plan.ccw.gap.toFixed(2)} / {plan.cw.gap.toFixed(2)} mm
-              </p>
-            </div>
-            {plan.warnings.length > 0 && (
-              <div className="warnings">{plan.warnings.map((warning, index) => <p key={index}>⚠ {warning}</p>)}</div>
-            )}
           </section>
 
         </section>
@@ -1057,30 +1105,24 @@ function App() {
             <p className={`message ${error ? 'error' : ''}`} role="status">{message}</p>
             <p className="keyboard-hint">Enter go / record · arrows jog XY · W/S radial · A/D along ring · Shift ×10 · [ ] step · Esc stop</p>
           </section>
-
         </aside>
       </main>
       <footer className="jobbar" aria-label="Job controls">
+        <div className="job-group">
+          <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
+          <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
+        </div>
         <div className="job-transport">
           <button className="primary" title="Stream the generated toolpath directly to FluidNC. The machine must be connected and homed." disabled={!connected || acting || client.running || busyWithBoard || !plan.route.length} onClick={() => void runOnMachine()}>▶ Run on machine</button>
           <button title="Pause the active FluidNC job with feed hold." disabled={!canPauseJob} onClick={pauseJob}>Ⅱ Pause job</button>
           <button className="primary" title={runWaitingForThread ? 'Attach the thread at the first nail, then continue the streamed toolpath.' : 'Resume the paused or held job on FluidNC.'} disabled={!canResumeJob} onClick={resumeJob}>{runWaitingForThread ? 'Thread attached: Resume' : '▶ Resume job'}</button>
           <button className="danger" title="Stop motion and reset the controller." disabled={!connected} onClick={stopMachine}>■ Stop</button>
         </div>
-        <details className="job-tools">
-          <summary title="Show save, copy, upload, and SD-card job actions.">File &amp; SD tools</summary>
-          <div className="job-tool-groups">
-            <div className="job-group">
-              <button title="Download the generated toolpath as a G-code file." onClick={() => downloadText(gcode, boardName, 'text/plain')}>Save G-code</button>
-              <button title="Copy the generated G-code to the clipboard." onClick={() => void copyGcode()}>Copy G-code</button>
-            </div>
-            <div className="job-group">
-              <label className="board-name">Board job<input title="Base filename to use when saving or uploading this job." value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
-              <button className="primary" title="Upload the generated G-code to the controller's SD card." disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>{uploading ? 'Uploading…' : '⬆ Upload to SD'}</button>
-              <button className="primary" title="Start the selected uploaded job on the controller." disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
-            </div>
-          </div>
-        </details>
+        <div className="job-group">
+          <label className="board-name">Board job<input title="Base filename to use when saving or uploading this job." value={fileName} onChange={event => setFileName(event.target.value)} /><span>.gcode</span></label>
+          <button className="primary" title="Upload the generated G-code to the controller's SD card." disabled={!plan.mp.length || uploading || busyWithBoard || client.running} onClick={() => void uploadToBoard()}>{uploading ? 'Uploading…' : '⬆ Upload to SD'}</button>
+          <button className="primary" title="Start the selected uploaded job on the controller." disabled={!connected || acting || busyWithBoard || client.running} onClick={() => void startBoardJob()}>▶ Start job on board</button>
+        </div>
         {(runMessage || uploadInfo || uploading) && (
           <div className="job-progress" role="status" aria-live="polite">
             {runMessage && <span>{runMessage}{runTotal > 0 ? ` (${runDone}/${runTotal})` : ''}</span>}
@@ -1156,7 +1198,7 @@ function App() {
                 <h3>Nail sequence</h3>
                 <p>Load or edit the nail visit order used to generate this job.</p>
               </div>
-              <button title="Load a nail visit sequence from a text or G-code file." onClick={openSequencePicker}>Load sequence</button>
+              <button title="Load a nail visit sequence from a .txt file." onClick={openSequencePicker}>Load sequence</button>
             </div>
             <div className="inline-actions">
               <button onClick={() => {
@@ -1331,9 +1373,11 @@ function App() {
           <p className="hint">Only use machine controls when the bed is clear and the machine is safe to move.</p>
         </div>
       </AppDialog>
-      <footer className={`toast ${error ? 'error' : ''}`} aria-live="polite">
-        <span>{message || (connected ? 'FluidNC connected' : 'Ready · Connect to FluidNC to control the machine')}</span>
-        <span className="statusbar-detail">{plan.visits} visits <b>·</b> XY only</span>
+      <footer className={`statusbar ${error ? 'error' : ''}`} role="status" aria-live="polite">
+        <span className={`status-dot ${connected ? 'connected' : ''}`} />
+        <span>{connected ? `${machineStatus.state} · ${measuredCount} nails measured` : `Not connected · ${measuredCount} nails measured`}</span>
+        <span className="status-message">{message || (connected ? 'FluidNC connected' : 'Ready · Connect to FluidNC to control the machine')}</span>
+        <span className="statusbar-detail">{plan.visits} visits · XY only</span>
         {anchorPickMode && <button title="Stop placing an anchor on the map." onClick={() => { setAnchorPickMode(false); setPickedAnchor(null) }}>Cancel map pick</button>}
       </footer>
     </div>

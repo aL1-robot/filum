@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   footprint,
   predict,
@@ -23,15 +23,18 @@ type Props = {
   pickingAnchor: boolean
   fitRequest: number
   onAnchorPoint: (point: Vec) => void
+  previewSidebar: ReactNode
+  previewSidebarOpen: boolean
+  onTogglePreviewSidebar: () => void
 }
 
 const COLORS = {
   bed: '#c7cbd4',
   label: '#6e7480',
-  nail: '#8f80a8',
-  path: '#a43bff',
-  approach: '#2676ca',
-  exit: '#d08030',
+  nail: '#6d6d68',
+  path: '#ff7025',
+  approach: '#1971c2',
+  exit: '#9c36b5',
   measured: '#239667',
   active: '#c02960',
   machine: '#17151d',
@@ -44,6 +47,12 @@ function canvasColors(canvas: HTMLCanvasElement) {
     ...COLORS,
     bed: styles.getPropertyValue('--canvas-bed').trim() || COLORS.bed,
     label: styles.getPropertyValue('--canvas-label').trim() || COLORS.label,
+    nail: styles.getPropertyValue('--nail').trim() || COLORS.nail,
+    path: styles.getPropertyValue('--accent').trim() || COLORS.path,
+    approach: styles.getPropertyValue('--approach').trim() || COLORS.approach,
+    exit: styles.getPropertyValue('--exit').trim() || COLORS.exit,
+    measured: styles.getPropertyValue('--success').trim() || COLORS.measured,
+    active: styles.getPropertyValue('--danger').trim() || COLORS.active,
     machine: styles.getPropertyValue('--canvas-machine').trim() || COLORS.machine,
   }
 }
@@ -278,7 +287,6 @@ function drawLocal(canvas: HTMLCanvasElement, plan: Plan) {
 
 export default function PlannerCanvas(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const localCanvasRef = useRef<HTMLCanvasElement>(null)
   const [view, setView] = useState<View | null>(null)
   const pointer = useRef<{ x: number; y: number; dragged: boolean } | null>(null)
   const suppressClick = useRef(false)
@@ -303,11 +311,9 @@ export default function PlannerCanvas(props: Props) {
 
   useEffect(() => {
     const main = canvasRef.current
-    const local = localCanvasRef.current
-    if (!main || !local) return
+    if (!main) return
     if (!view) setView(fitView(main.clientWidth, main.clientHeight, props.plan.p.bw, props.plan.p.bh))
     else drawMain(main, view, props)
-    drawLocal(local, props.plan)
   }, [props, props.theme, view])
 
   function fit() {
@@ -330,54 +336,110 @@ export default function PlannerCanvas(props: Props) {
 
   return (
     <div className="canvas-layout">
-      <div className={`main-canvas-wrap ${props.pickingAnchor ? 'picking' : ''}`}>
-        <canvas
-          ref={canvasRef}
-          className="main-canvas"
-          aria-label="Machine bed and generated thread path"
-          title={props.pickingAnchor
-            ? 'Click to place the selected calibration anchor. Drag to pan; use the mouse wheel to zoom.'
-            : 'Drag to pan, use the mouse wheel to zoom, and double-click to fit the machine bed.'}
-          onClick={handleClick}
-          onDoubleClick={fit}
-          onWheel={event => {
-            if (!view) return
-            const bounds = event.currentTarget.getBoundingClientRect()
-            setView(zoomAt(view, event.clientX - bounds.left, event.clientY - bounds.top, event.deltaY))
-          }}
-          onPointerDown={event => {
-            pointer.current = { x: event.clientX, y: event.clientY, dragged: false }
-            event.currentTarget.setPointerCapture(event.pointerId)
-          }}
-          onPointerMove={event => {
-            const start = pointer.current
-            if (!start || !view) return
-            const dx = event.clientX - start.x
-            const dy = event.clientY - start.y
-            if (Math.hypot(dx, dy) > 3) start.dragged = true
-            if (start.dragged) {
-              setView(panBy(view, dx, dy))
-              pointer.current = { x: event.clientX, y: event.clientY, dragged: true }
-            }
-          }}
-          onPointerUp={() => {
-            suppressClick.current = pointer.current?.dragged ?? false
-            pointer.current = null
-          }}
-          onPointerCancel={() => { pointer.current = null }}
-        />
-        {props.pickingAnchor && <span className="canvas-instruction">Click the board to place the selected anchor</span>}
-      </div>
-      <div className="local-view">
-        <canvas ref={localCanvasRef} aria-label="Nail footprint and loop clearance" title="Local view of the nail footprint, neighboring nails, and loop paths." />
-        <div className="local-notes">
-          <div className="local-legend">
-            <span className="ccw">CCW wrap</span>
-            <span className="cw">CW wrap</span>
-            <span>→ outward</span>
+      <div className={`main-canvas-wrap ${props.pickingAnchor ? 'picking' : ''} ${props.previewSidebarOpen ? 'with-preview-sidebar' : ''}`}>
+        <div className="canvas-stage">
+          <canvas
+            ref={canvasRef}
+            className="main-canvas"
+            aria-label="Machine bed and generated thread path"
+            title={props.pickingAnchor
+              ? 'Click to place the selected calibration anchor. Drag to pan; use the mouse wheel to zoom.'
+              : 'Drag to pan, use the mouse wheel to zoom, and double-click to fit the machine bed.'}
+            onClick={handleClick}
+            onDoubleClick={fit}
+            onWheel={event => {
+              if (!view) return
+              const bounds = event.currentTarget.getBoundingClientRect()
+              setView(zoomAt(view, event.clientX - bounds.left, event.clientY - bounds.top, event.deltaY))
+            }}
+            onPointerDown={event => {
+              pointer.current = { x: event.clientX, y: event.clientY, dragged: false }
+              event.currentTarget.setPointerCapture(event.pointerId)
+            }}
+            onPointerMove={event => {
+              const start = pointer.current
+              if (!start || !view) return
+              const dx = event.clientX - start.x
+              const dy = event.clientY - start.y
+              if (Math.hypot(dx, dy) > 3) start.dragged = true
+              if (start.dragged) {
+                setView(panBy(view, dx, dy))
+                pointer.current = { x: event.clientX, y: event.clientY, dragged: true }
+              }
+            }}
+            onPointerUp={() => {
+              suppressClick.current = pointer.current?.dragged ?? false
+              pointer.current = null
+            }}
+            onPointerCancel={() => { pointer.current = null }}
+          />
+          {props.pickingAnchor && <span className="canvas-instruction">Click the board to place the selected anchor</span>}
+          <div className="canvas-legend" aria-label="Toolpath legend">
+            <span><i className="thread-line" />Thread path</span>
+            <span><i className="approach-line" />Approach from home</span>
+            <span><i className="exit-line" />Return to home</span>
           </div>
-          <p>One nail footprint, neighboring nails, and both loop directions</p>
+          <div className="canvas-zoom">
+            <button title="Zoom in." aria-label="Zoom in" onClick={() => {
+              const canvas = canvasRef.current
+              if (canvas && view) setView(zoomAt(view, canvas.clientWidth / 2, canvas.clientHeight / 2, -1))
+            }}>+</button>
+            <button title="Zoom out." aria-label="Zoom out" onClick={() => {
+              const canvas = canvasRef.current
+              if (canvas && view) setView(zoomAt(view, canvas.clientWidth / 2, canvas.clientHeight / 2, 1))
+            }}>−</button>
+          </div>
         </div>
+        {props.previewSidebarOpen ? (
+          <aside className="preview-sidebar" aria-label="Preview details">
+            <div className="preview-sidebar-header">
+              <span>Preview details</span>
+              <button
+                title="Collapse preview details."
+                aria-label="Collapse preview details"
+                aria-expanded="true"
+                onClick={props.onTogglePreviewSidebar}
+              >›</button>
+            </div>
+            <div className="preview-sidebar-content">{props.previewSidebar}</div>
+          </aside>
+        ) : (
+          <button
+            className="preview-sidebar-open"
+            title="Show local view and plan summary."
+            aria-label="Show preview details"
+            aria-expanded="false"
+            onClick={props.onTogglePreviewSidebar}
+          >‹ Details</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function PlannerLocalView({ plan }: { plan: Plan }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const draw = () => drawLocal(canvas, plan)
+    const observer = new ResizeObserver(draw)
+    observer.observe(canvas)
+    draw()
+    return () => observer.disconnect()
+  }, [plan])
+
+  return (
+    <div className="local-view">
+      <canvas ref={canvasRef} aria-label="Nail footprint and loop clearance" title="Local view of the nail footprint, neighboring nails, and loop paths." />
+      <div className="local-notes">
+        <div className="local-legend">
+          <span className="ccw">CCW wrap</span>
+          <span className="cw">CW wrap</span>
+          <span>→ outward</span>
+        </div>
+        <p>One nail footprint, neighboring nails, and both loop directions</p>
       </div>
     </div>
   )
