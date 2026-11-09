@@ -13,38 +13,62 @@ pnpm run dev
 
 Use `pnpm run build` to create a production build and `pnpm run lint` to lint the project.
 
-## Linux desktop and Android
+## Desktop and Android builds
 
-Filum uses Tauri 2. Install Rust 1.90 or newer and the Linux system dependencies listed in the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux). On Fedora, install the WebKitGTK 4.1 development package, OpenSSL development files, librsvg, and the compiler/build tools for your release.
+Filum uses Tauri 2. Install Rust 1.90 or newer and the Linux dependencies listed in the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
+
+### Fedora desktop
+
+Install the Fedora development packages and RPM bundler dependency:
+
+```sh
+sudo dnf install webkit2gtk4.1-devel openssl-devel librsvg2-devel libappindicator-gtk3-devel gcc gcc-c++ make rpm-build
+```
+
+From this directory, build and install the Fedora RPM:
 
 ```sh
 pnpm install
 pnpm run tauri:dev
-pnpm run tauri:build
+pnpm exec tauri build --bundles rpm
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
 ```
 
-The Linux bundles are configured for `.deb`, `.rpm`, and AppImage output under `src-tauri/target/release/bundle/`. `pnpm run dev` remains the browser-only development mode.
+The configured Linux bundle formats are `.deb`, `.rpm`, and AppImage, under `src-tauri/target/release/bundle/`. Run `pnpm run tauri:build` to build all configured formats. Tauri does not produce a Flatpak; this repository currently has no Flatpak manifest or Flatpak build instructions. `pnpm run dev` starts browser-only mode.
 
-For Android, install Android Studio and the SDK Platform, Platform-Tools, NDK (Side by side), Build-Tools, and Command-line Tools from SDK Manager. Set `JAVA_HOME`, `ANDROID_HOME`, and `NDK_HOME`, then install all four Tauri Rust targets:
+### Android
+
+Install Android Studio. In **Tools → SDK Manager**, install Android SDK Platform **37** (the current Gradle project uses compile/target SDK 37), Platform-Tools, NDK (Side by side), Build-Tools, and Command-line Tools (latest). Set `JAVA_HOME` to Android Studio's bundled JBR directory. Then, from this directory, configure the SDK environment. The NDK command selects the highest installed side-by-side version, so it does not require typing a placeholder version:
 
 ```sh
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export NDK_HOME="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-pnpm exec tauri android init
-pnpm run android:dev
-pnpm run android:build
 ```
 
-`android:build` creates a debug APK; install the generated APK with `adb install -r <path-to-debug-apk>`. `android:dev` requires USB debugging and an authorized device.
+Initialize the Android project once, then build a debug APK:
+
+```sh
+pnpm exec tauri android init
+pnpm run android:build
+find src-tauri/gen/android/app/build/outputs -name '*.apk' -print
+```
+
+Install the APK with `adb install -r <apk-path>`. For live development on a connected device with USB debugging enabled, run `pnpm run android:dev`.
+
+### What to commit
+
+Commit `src-tauri/`: its Rust sources, Cargo files, capabilities, icons, and Tauri configuration are required to build the app. After `tauri android init`, commit `src-tauri/gen/android/` too; it contains the Gradle wrapper and Android project configuration. The existing ignore rules exclude Cargo build output, generated schemas, Gradle/build caches, local SDK settings, and signing keys. Do not add a blanket `src-tauri/**` ignore.
 
 Tauri's generated icon is a placeholder; replace it with Filum artwork and regenerate platform icons with `pnpm exec tauri icon <image-file>`.
 
 ### Device access and network status
 
-The packaged app uses the Rust-backed Tauri WebSocket and HTTP plugins; browser development uses the WebView's native APIs. FluidNC's existing endpoint fallback order and `webui-v3` subprotocol are retained. Tauri's HTTP plugin scope permits only the `/upload` path over HTTP; `boardURL` validates that upload targets are private IPv4 addresses or localhost before sending. Tauri's WebSocket plugin does not expose a URL-scope permission, so the app only constructs its existing FluidNC port/path attempts from the configured board address. No Android cleartext manifest override is enabled.
+The packaged app uses the Rust-backed Tauri WebSocket and HTTP plugins; browser development uses the WebView's native APIs. FluidNC's existing endpoint fallback order and `webui-v3` subprotocol are retained. Tauri's HTTP plugin scope permits only the `/upload` path over HTTP; `boardURL` validates that upload targets are private IPv4 addresses or localhost before sending. Tauri's WebSocket plugin does not expose a URL-scope permission, so the app only constructs its existing FluidNC port/path attempts from the configured board address. The generated Android debug variant permits cleartext traffic for local FluidNC HTTP; review the Android network policy before distributing a release build.
 
-**The packaged network spike has not yet been run against a FluidNC board.** Browser-mode UI was exercised, but the WebView and Rust transports have not been compared from a packaged Tauri app. This environment does not have the Linux WebKitGTK 4.1 dependency or an attached Android device. Therefore Rust-backed WebSocket/HTTP compatibility, multipart upload, SD listing, and actual Linux/Android packaged builds remain unverified. Open `/spike` in the packaged app (or use `?spike=1`) to test the WebView transport followed by the Rust transport. It uploads a uniquely named, text-only file and leaves it on the board SD card. Confirm the Rust transport with `pnpm run tauri:dev` and `pnpm run android:dev` on the board's network before relying on it; if it fails, capture the app logs and test the WebView transport before changing Android cleartext settings.
-
-On this machine, `tauri android init` also stops because Android SDK Command-line Tools and the NDK are missing; `JAVA_HOME` and Android Rust targets are not configured. Consequently, no generated Android project or INTERNET-manifest check is included yet. The Screen Wake Lock API is wired and logs failures, but Android WebView support and a Kotlin window-flag fallback still need phone verification.
+To test board connectivity, open `/spike` in a Tauri or Android build (or use `?spike=1`). It compares the WebView and Rust-backed transports, uploads small uniquely named text files, and leaves them on the board SD card. Verify the Rust transport and SD listing on the same network before running a real job.
 
 ### Files, persistence, and mobile behavior
 
