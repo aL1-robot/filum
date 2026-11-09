@@ -84,11 +84,34 @@ Change `productName`, the desktop window title, and `identifier` in `src-tauri/t
 
 ### Android release signing
 
-Signing credentials are not included. Generate your own keystore locally; do not commit it or `src-tauri/keystore.properties`:
+The release build must be signed before Android can install it. Create a keystore locally and keep a secure backup; future updates to the installed app must use the same key. Do not commit the keystore or `src-tauri/gen/android/keystore.properties`.
 
 ```sh
-keytool -genkeypair -v -keystore filum-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias filum
+keytool -genkeypair -v -keystore "$HOME/filum-release.jks" -keyalg RSA -keysize 2048 -validity 10000 -alias filum
 ```
+
+Use the password you set in `keytool` for both the keystore and key. Create `src-tauri/gen/android/keystore.properties` with your alias, password, and absolute keystore path:
+
+```properties
+keyAlias=filum
+password=<the password you set in keytool>
+storeFile=/absolute/path/to/filum-release.jks
+```
+
+The Android Gradle project reads this file to sign the release variant. Build and locate the signed APK with:
+
+```sh
+pnpm exec tauri android build --apk
+find src-tauri/gen/android/app/build/outputs -name '*.apk' -print
+```
+
+Install the release APK on a connected device with USB debugging enabled:
+
+```sh
+adb install -r <path-to-release.apk>
+```
+
+The debug APK is a separate app (`.debug` application ID) and can remain installed alongside the release. For subsequent release updates, keep the same keystore and increase the Android version code. Never share or commit the keystore or its password.
 
 ## Interface
 
