@@ -1,6 +1,12 @@
 # filum
 
-A responsive React and TypeScript planner for FluidNC string-art machines. Create nail sequences, preview toolpaths, calibrate the machine, and generate, upload, or run G-code. Planner and FluidNC logic live in DOM-free TypeScript modules; React and canvas handle the interface.
+Filum is a web, desktop, and Android app for turning string-art nail sequences into G-code for FluidNC-controlled Cartesian CNC machines. Create or import a sequence, preview its toolpath, calibrate your machine, then export the G-code or send it to the controller.
+
+<p align="center">
+  <img src="./public/filum.jpg" alt="Filum app screenshot" width="900">
+</p>
+
+The interface is built with React and TypeScript, with Tauri providing the desktop and Android apps. Planner and FluidNC logic are kept in DOM-free TypeScript modules.
 
 ## Development
 
