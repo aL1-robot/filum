@@ -249,7 +249,22 @@ function validatePlannerSyncState(value: unknown): PlannerSyncState {
     typeof state.sequence !== 'string' || state.sequence.length > 2_000_000 ||
     state.measurements == null || typeof state.measurements !== 'object' ||
     typeof state.address !== 'string' || state.address.length > 512 ||
-    typeof state.fileName !== 'string' || state.fileName.length > 128
+    typeof state.fileName !== 'string' || state.fileName.length > 128 ||
+    (state.theme !== 'system' && state.theme !== 'light' && state.theme !== 'dark') ||
+    typeof state.measureStep !== 'number' || !Number.isFinite(state.measureStep) ||
+    typeof state.clearance !== 'number' || !Number.isFinite(state.clearance) ||
+    typeof state.travelMargin !== 'number' || !Number.isFinite(state.travelMargin) ||
+    typeof state.autoMove !== 'boolean' ||
+    typeof state.jogStep !== 'number' || !Number.isFinite(state.jogStep) ||
+    !Array.isArray(state.queue) || state.queue.length > 100_000 ||
+    !state.queue.every(nail => typeof nail === 'number' && Number.isInteger(nail)) ||
+    typeof state.queueIndex !== 'number' || !Number.isInteger(state.queueIndex) ||
+    state.queueIndex < 0 || state.queueIndex > state.queue.length ||
+    typeof state.arrived !== 'boolean' ||
+    state.fieldGroupsOpen == null || typeof state.fieldGroupsOpen !== 'object' ||
+    Object.values(state.fieldGroupsOpen).some(open => typeof open !== 'boolean') ||
+    typeof state.showDoneOnly !== 'boolean' ||
+    (state.visibleVisits !== null && (typeof state.visibleVisits !== 'number' || !Number.isFinite(state.visibleVisits)))
   ) {
     throw new Error('Malformed remote planner state.')
   }
@@ -370,16 +385,6 @@ function App() {
   const [runTotal, setRunTotal] = useState(0)
   const [address, setAddress] = useState('http://192.168.1.32/')
   const [fileName, setFileName] = useState('string_art')
-  const plannerState = useMemo<PlannerSyncState>(() => ({
-    raw,
-    anchors,
-    anchorAuto,
-    sequence,
-    measurements,
-    address,
-    fileName,
-  }), [raw, anchors, anchorAuto, sequence, measurements, address, fileName])
-  const plannerStateRef = useRef(plannerState)
   const [queue, setQueue] = useState<number[]>([])
   const [queueIndex, setQueueIndex] = useState(0)
   const [arrived, setArrived] = useState(false)
@@ -387,7 +392,7 @@ function App() {
   const [autoMove, setAutoMove] = useState(true)
   const [measureStep, setMeasureStep] = useState(9)
   const [clearance, setClearance] = useState(1.5)
-  const [travelMargin, setTravelMargin] = useState(10)
+  const [travelMargin, setTravelMargin] = useState(5)
   const [jogStep, setJogStep] = useState(0.25)
   const [filesKind, setFilesKind] = useState<'SD' | 'LocalFS'>('SD')
   const [files, setFiles] = useState<BoardFile[]>([])
@@ -408,6 +413,34 @@ function App() {
   const jogRingRef = useRef<(direction: 'out' | 'in' | 'ccw' | 'cw', shift?: boolean) => void>(() => {})
   const confirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const autoConnectAttemptedRef = useRef(false)
+  const plannerState = useMemo<PlannerSyncState>(() => ({
+    raw,
+    anchors,
+    anchorAuto,
+    sequence,
+    measurements,
+    address,
+    fileName,
+    theme,
+    measureStep,
+    clearance,
+    travelMargin,
+    autoMove,
+    jogStep,
+    queue,
+    queueIndex,
+    arrived,
+    fieldGroupsOpen,
+    showDoneOnly,
+    visibleVisits,
+  }), [
+    raw, anchors, anchorAuto, sequence, measurements, address, fileName, theme,
+    measureStep, clearance, travelMargin, autoMove, jogStep, queue, queueIndex,
+    arrived, fieldGroupsOpen, showDoneOnly, visibleVisits,
+  ])
+  const plannerStateRef = useRef(plannerState)
+  const lastAppliedPlannerStateRef = useRef<string | null>(null)
+  const localPlannerChangePendingRef = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -508,7 +541,15 @@ function App() {
       setMachineStatus({ ...client.status })
       if (event.type === 'planner-state' && remoteMode) {
         try {
-          applyPlannerState(event.state)
+          const incoming = validatePlannerSyncState(event.state)
+          const serialized = JSON.stringify(incoming)
+          if (!localPlannerChangePendingRef.current || serialized === JSON.stringify(plannerStateRef.current)) {
+            applyPlannerState(incoming)
+            lastAppliedPlannerStateRef.current = serialized
+            if (serialized === JSON.stringify(plannerStateRef.current)) {
+              localPlannerChangePendingRef.current = false
+            }
+          }
         } catch (reason) {
           console.error('Rejected malformed planner state from the desktop.', reason)
           setMessage('Could not apply planner settings from the desktop.')
@@ -599,18 +640,29 @@ function App() {
   }, [client, remoteMode])
 
   useEffect(() => {
-    if (remoteMode) {
-      if (!(client instanceof RemoteFluidNC) || !client.plannerReady) return
-      void client.syncPlannerState(plannerState).catch(reason => {
-        console.error('Unable to synchronize planner state with the desktop.', reason)
-        notify('Planner changes could not be synchronized with the desktop.', true)
+    const serialized = JSON.stringify(plannerState)
+    if (remoteMode && serialized === lastAppliedPlannerStateRef.current) return
+    if (remoteMode) localPlannerChangePendingRef.current = true
+    const timer = window.setTimeout(() => {
+      if (remoteMode) {
+        if (!(client instanceof RemoteFluidNC) || !client.plannerReady) return
+        void client.syncPlannerState(plannerState).then(() => {
+          if (JSON.stringify(plannerStateRef.current) === serialized) {
+            localPlannerChangePendingRef.current = false
+            lastAppliedPlannerStateRef.current = serialized
+          }
+        }, reason => {
+          console.error('Unable to synchronize planner state with the desktop.', reason)
+          notify('Planner changes could not be synchronized with the desktop.', true)
+        })
+        return
+      }
+      if (!isTauri() || isAndroid()) return
+      void emit('remote-event', { type: 'planner-state', state: plannerState }).catch(reason => {
+        console.error('Unable to broadcast the desktop planner state.', reason)
       })
-      return
-    }
-    if (!isTauri() || isAndroid()) return
-    void emit('remote-event', { type: 'planner-state', state: plannerState }).catch(reason => {
-      console.error('Unable to broadcast the desktop planner state.', reason)
-    })
+    }, 150)
+    return () => window.clearTimeout(timer)
   }, [client, remoteMode, plannerState])
 
   useEffect(() => {
@@ -797,6 +849,18 @@ function App() {
     setMeasurements(state.measurements)
     setAddress(state.address)
     setFileName(state.fileName)
+    setTheme(state.theme)
+    setMeasureStep(state.measureStep)
+    setClearance(state.clearance)
+    setTravelMargin(state.travelMargin)
+    setAutoMove(state.autoMove)
+    setJogStep(state.jogStep)
+    setQueue(state.queue)
+    setQueueIndex(state.queueIndex)
+    setArrived(state.arrived)
+    setFieldGroupsOpen(state.fieldGroupsOpen)
+    setShowDoneOnly(state.showDoneOnly)
+    setVisibleVisits(state.visibleVisits)
     return state
   }
 

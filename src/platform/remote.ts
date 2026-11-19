@@ -23,12 +23,29 @@ export type PlannerSyncState = {
   measurements: Measurements
   address: string
   fileName: string
+  theme: 'system' | 'light' | 'dark'
+  measureStep: number
+  clearance: number
+  travelMargin: number
+  autoMove: boolean
+  jogStep: number
+  queue: number[]
+  queueIndex: number
+  arrived: boolean
+  fieldGroupsOpen: Record<string, boolean>
+  showDoneOnly: boolean
+  visibleVisits: number | null
 }
 
 type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   timeout: number
+}
+
+type PlannerSyncWaiter = {
+  resolve: () => void
+  reject: (error: Error) => void
 }
 
 export function isRemoteMode(): boolean {
@@ -53,6 +70,9 @@ export class RemoteFluidNC {
   private activeRunInfo: RemoteSnapshot['runInfo'] = null
   private boardBusy = false
   private lastPlannerState = ''
+  private queuedPlannerState: PlannerSyncState | null = null
+  private plannerSyncRunning = false
+  private plannerSyncWaiters: PlannerSyncWaiter[] = []
   private uploadCallbacks = new Set<(seconds: number) => void>()
 
   constructor() {
@@ -176,15 +196,45 @@ export class RemoteFluidNC {
     await this.request<void>('pauseRun')
   }
 
-  async syncPlannerState(state: PlannerSyncState): Promise<void> {
+  syncPlannerState(state: PlannerSyncState): Promise<void> {
     const serialized = JSON.stringify(state)
-    if (serialized === this.lastPlannerState) return
+    if (
+      serialized === this.lastPlannerState &&
+      (this.queuedPlannerState == null || JSON.stringify(this.queuedPlannerState) === serialized)
+    ) {
+      return Promise.resolve()
+    }
     this.lastPlannerState = serialized
+    this.queuedPlannerState = state
+    const result = new Promise<void>((resolve, reject) => {
+      this.plannerSyncWaiters.push({ resolve, reject })
+    })
+    void this.flushPlannerState()
+    return result
+  }
+
+  private async flushPlannerState(): Promise<void> {
+    if (this.plannerSyncRunning) return
+    this.plannerSyncRunning = true
     try {
-      await this.request<void>('setPlannerState', [state])
-    } catch (error) {
+      while (this.queuedPlannerState) {
+        const state = this.queuedPlannerState
+        this.queuedPlannerState = null
+        await this.request<void>('setPlannerState', [state])
+      }
+      const waiters = this.plannerSyncWaiters
+      this.plannerSyncWaiters = []
+      for (const waiter of waiters) waiter.resolve()
+    } catch (reason) {
+      this.queuedPlannerState = null
       this.lastPlannerState = ''
-      throw error
+      const error = reason instanceof Error ? reason : new Error(String(reason))
+      const waiters = this.plannerSyncWaiters
+      this.plannerSyncWaiters = []
+      for (const waiter of waiters) waiter.reject(error)
+    } finally {
+      this.plannerSyncRunning = false
+      if (this.queuedPlannerState) void this.flushPlannerState()
     }
   }
 
