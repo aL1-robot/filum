@@ -29,3 +29,9 @@ tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-clipboard-manager = "2"
+uuid = { version = "1", features = ["v4"] }
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tower-http = { version = "0.6", features = ["fs"] }

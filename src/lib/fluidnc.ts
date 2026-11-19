@@ -34,6 +34,7 @@ export type RunResult = { ok: true; lines: number } | { ok: false; reason: strin
 
 export type FluidEvent =
   | { type: 'status'; status: MachineStatus }
+  | { type: 'planner-state'; state: unknown }
   | { type: 'disconnected' }
   | { type: 'machine-error'; text: string }
   | { type: 'run-progress'; done: number; total: number }

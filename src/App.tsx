@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { emit, listen } from '@tauri-apps/api/event'
 import {
   FIELD_GROUPS,
   approachToNail,
@@ -25,6 +27,8 @@ import { FluidNC, type BoardFile, type FluidEvent } from './lib/fluidnc.ts'
 import { writeClipboardText } from './platform/clipboard.ts'
 import { openTextDocument, saveTextDocument, type TextDocument } from './platform/files.ts'
 import { isTauri } from './platform/runtime.ts'
+import { isAndroid } from './platform/runtime.ts'
+import { isRemoteMode, RemoteFluidNC, type PlannerSyncState } from './platform/remote.ts'
 import { loadAppPreferences, savePreference } from './platform/storage.ts'
 import NetworkSpike from './NetworkSpike.tsx'
 import {
@@ -45,13 +49,14 @@ const THEME_STORAGE_KEY = 'filum-theme'
 type ThemePreference = 'system' | 'light' | 'dark'
 type AppMenu = 'file' | 'settings' | 'view' | 'machine' | 'help'
 type AppAction = 'fit' | 'toggle-done' | 'play' | 'connect' | 'home' | 'stop'
-type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help'
+type AppDialogView = 'settings' | 'sequence' | 'gcode' | 'boardFiles' | 'machineConfig' | 'anchors' | 'help' | 'remoteAccess'
 type AppMenuItem = { label: string; title?: string } & (
   | { dialog: AppDialogView; action?: never }
   | { action: 'open-sequence'; dialog?: never }
   | { action: AppAction; dialog?: never }
 )
 type AppMenuGroup = { label: string; items: AppMenuItem[] }
+type RemoteAccessInfo = { address: string; port: number }
 
 function storedThemePreference(): ThemePreference {
   try {
@@ -98,6 +103,7 @@ const APP_MENU_GROUPS: Record<AppMenu, AppMenuGroup[]> = {
     { label: 'Controller', items: [
       { label: 'Connect / disconnect', action: 'connect', title: 'Connect to or disconnect from FluidNC.' },
       { label: 'Board files', dialog: 'boardFiles' },
+      { label: 'Remote access', dialog: 'remoteAccess', title: 'Control this desktop from a phone browser on the same network.' },
     ] },
     { label: 'Machine setup', items: [
       { label: 'Machine configuration', dialog: 'machineConfig' },
@@ -120,12 +126,13 @@ function renderMenuItems(
   onSelect: (dialog: AppDialogView) => void,
   onOpenSequence: () => void,
   onAction: (action: AppAction) => void,
+  remoteMode: boolean,
 ) {
   return APP_MENU_GROUPS[menu].map((group, groupIndex) => (
     <div className="menu-group" key={group.label}>
       {groupIndex > 0 && <div className="menu-separator" role="separator" />}
       <div className="menu-group-label">{group.label}</div>
-      {group.items.map(item => (
+      {group.items.filter(item => !(remoteMode && item.action === 'connect')).map(item => (
         <button
           role="menuitem"
           key={item.dialog ?? item.action}
@@ -207,10 +214,139 @@ function formatBytes(size: number): string {
   return size >= 1048576 ? `${(size / 1048576).toFixed(2)} MB` : `${(size / 1024).toFixed(1)} KB`
 }
 
+function requiredRemoteArgs(args: unknown): unknown[] {
+  if (!Array.isArray(args)) throw new Error('Malformed remote request arguments.')
+  return args
+}
+
+function remoteString(args: unknown[], index: number): string {
+  const value = args[index]
+  if (typeof value !== 'string') throw new Error('Malformed remote request: expected text.')
+  return value
+}
+
+function remoteNumber(args: unknown[], index: number): number {
+  const value = args[index]
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Malformed remote request: expected a finite number.')
+  return value
+}
+
+function remoteStringList(args: unknown[], index: number): string[] {
+  const value = args[index]
+  if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+    throw new Error('Malformed remote request: expected a list of text lines.')
+  }
+  return value
+}
+
+function validatePlannerSyncState(value: unknown): PlannerSyncState {
+  if (value == null || typeof value !== 'object') throw new Error('Malformed remote planner state.')
+  const state = value as Record<string, unknown>
+  if (
+    state.raw == null || typeof state.raw !== 'object' ||
+    !Array.isArray(state.anchors) ||
+    typeof state.anchorAuto !== 'boolean' ||
+    typeof state.sequence !== 'string' || state.sequence.length > 2_000_000 ||
+    state.measurements == null || typeof state.measurements !== 'object' ||
+    typeof state.address !== 'string' || state.address.length > 512 ||
+    typeof state.fileName !== 'string' || state.fileName.length > 128
+  ) {
+    throw new Error('Malformed remote planner state.')
+  }
+  const raw = state.raw as Record<string, unknown>
+  const rawKeys = Object.keys(INITIAL.raw)
+  if (Object.keys(raw).length !== rawKeys.length || rawKeys.some(key =>
+    !(key in raw) || typeof raw[key] !== typeof INITIAL.raw[key as keyof RawParams] ||
+    (typeof raw[key] === 'number' && !Number.isFinite(raw[key])),
+  )) {
+    throw new Error('Malformed remote planner settings.')
+  }
+  if (!state.anchors.every(anchor =>
+    anchor != null && typeof anchor === 'object' &&
+    'nail' in anchor && typeof anchor.nail === 'number' && Number.isFinite(anchor.nail) &&
+    'x' in anchor && typeof anchor.x === 'number' && Number.isFinite(anchor.x) &&
+    'y' in anchor && typeof anchor.y === 'number' && Number.isFinite(anchor.y),
+  )) {
+    throw new Error('Malformed remote calibration anchors.')
+  }
+  const measurementEntries = Object.entries(state.measurements)
+  if (measurementEntries.length > 100_000 || measurementEntries.some(([, point]) =>
+    !Array.isArray(point) || point.length !== 2 ||
+    typeof point[0] !== 'number' || !Number.isFinite(point[0]) ||
+    typeof point[1] !== 'number' || !Number.isFinite(point[1]),
+  )) {
+    throw new Error('Malformed remote calibration measurements.')
+  }
+  return value as PlannerSyncState
+}
+
+async function dispatchRemoteRequest(client: FluidNC | RemoteFluidNC, method: string, value: unknown): Promise<unknown> {
+  const args = requiredRemoteArgs(value)
+  switch (method) {
+    case 'snapshot':
+      return { status: client.status, running: client.running, runInfo: client.runInfo, sdBusy: client.sdBusy() }
+    case 'send':
+      return client.send(remoteString(args, 0))
+    case 'jog':
+      return client.jog(remoteNumber(args, 0), remoteNumber(args, 1), remoteNumber(args, 2))
+    case 'stop':
+      return client.stop()
+    case 'pauseMotion':
+      return client.pauseMotion()
+    case 'unlock':
+      return client.unlock()
+    case 'home': {
+      const command = remoteString(args, 0)
+      if (command !== '$H' && command !== '$HX' && command !== '$HY') throw new Error('Unsupported home command.')
+      return client.home(command)
+    }
+    case 'settle':
+      return client.settle()
+    case 'list': {
+      const kind = remoteString(args, 0)
+      if (kind !== 'SD' && kind !== 'LocalFS') throw new Error('Unsupported controller file listing.')
+      return client.list(kind)
+    }
+    case 'fileSize':
+      return client.fileSize(remoteString(args, 0))
+    case 'uploadAndVerify':
+      return client.uploadAndVerify(
+        remoteString(args, 0),
+        remoteString(args, 1),
+        remoteString(args, 2),
+        seconds => {
+          void emit('remote-event', { type: 'upload-tick', seconds }).catch(error => {
+            console.error('Unable to forward remote upload progress.', error)
+          })
+        },
+      )
+    case 'runFile':
+      return client.runFile(remoteString(args, 0))
+    case 'deleteFile':
+      return client.deleteFile(remoteString(args, 0))
+    case 'resumeHold':
+      return client.resumeHold()
+    case 'runGcode':
+      return client.runGcode(remoteStringList(args, 0), remoteStringList(args, 1))
+    case 'resumeRun':
+      return client.resumeRun()
+    case 'pauseRun':
+      return client.pauseRun()
+    case 'sdBusy':
+      return client.sdBusy()
+    default:
+      throw new Error('Unsupported remote operation.')
+  }
+}
+
 function App() {
-  const client = useMemo(() => new FluidNC(), [])
+  const remoteMode = isRemoteMode()
+  const client = useMemo(() => remoteMode ? new RemoteFluidNC() : new FluidNC(), [remoteMode])
   const [theme, setTheme] = useState<ThemePreference>(storedThemePreference)
   const [settingsReady, setSettingsReady] = useState(false)
+  const [remoteInfo, setRemoteInfo] = useState<RemoteAccessInfo | null>(null)
+  const [remoteBusy, setRemoteBusy] = useState(false)
+  const [remoteError, setRemoteError] = useState('')
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [raw, setRaw] = useState<RawParams>(INITIAL.raw)
   const [anchors, setAnchors] = useState<Anchor[]>(INITIAL.anchors)
@@ -234,6 +370,16 @@ function App() {
   const [runTotal, setRunTotal] = useState(0)
   const [address, setAddress] = useState('http://192.168.1.32/')
   const [fileName, setFileName] = useState('string_art')
+  const plannerState = useMemo<PlannerSyncState>(() => ({
+    raw,
+    anchors,
+    anchorAuto,
+    sequence,
+    measurements,
+    address,
+    fileName,
+  }), [raw, anchors, anchorAuto, sequence, measurements, address, fileName])
+  const plannerStateRef = useRef(plannerState)
   const [queue, setQueue] = useState<number[]>([])
   const [queueIndex, setQueueIndex] = useState(0)
   const [arrived, setArrived] = useState(false)
@@ -270,14 +416,14 @@ function App() {
       if (preferences.theme === 'system' || preferences.theme === 'light' || preferences.theme === 'dark') {
         setTheme(preferences.theme)
       }
-      if (preferences.measurements != null) {
+      if (!remoteMode && preferences.measurements != null) {
         const saved = preferences.measurements
         const measurementsValue = saved && typeof saved === 'object' && 'm' in saved
           ? saved.m
           : saved
         setMeasurements(normalizeMeasurements(measurementsValue))
       }
-      if (typeof preferences.address === 'string') setAddress(preferences.address)
+      if (!remoteMode && typeof preferences.address === 'string') setAddress(preferences.address)
       setSettingsReady(true)
     }).catch(error => {
       console.error('Unable to load saved Filum settings.', error)
@@ -288,7 +434,11 @@ function App() {
       }
     })
     return () => { active = false }
-  }, [])
+  }, [remoteMode])
+
+  useEffect(() => {
+    plannerStateRef.current = plannerState
+  }, [plannerState])
 
   useEffect(() => {
     const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
@@ -349,13 +499,22 @@ function App() {
   const boardJobPaused = boardJobActive && /^Hold/.test(machineStatus.state)
   const canPauseJob = connected && ((client.running && !runPaused) || (boardJobActive && !boardJobPaused))
   const canResumeJob = connected && (runPaused || boardJobPaused)
+  const remoteReady = !(client instanceof RemoteFluidNC) || (client.serverConnected && client.plannerReady)
   const anchorIndexes = anchors.map(anchor => anchor.nail - plan.p.ib)
   const allAnchorsMeasured = anchorIndexes.every(index => measurements[index] != null)
 
   useEffect(() => {
     const unsubscribe = client.subscribe((event: FluidEvent) => {
       setMachineStatus({ ...client.status })
-      if (event.type === 'run-progress') {
+      if (event.type === 'planner-state' && remoteMode) {
+        try {
+          applyPlannerState(event.state)
+        } catch (reason) {
+          console.error('Rejected malformed planner state from the desktop.', reason)
+          setMessage('Could not apply planner settings from the desktop.')
+          setError(true)
+        }
+      } else if (event.type === 'run-progress') {
         setRunDone(event.done)
         setRunTotal(event.total)
         setRunMessage(`Running: ${event.done} / ${event.total} lines acknowledged`)
@@ -370,15 +529,107 @@ function App() {
         setMessage(event.text)
         setError(true)
       }
+      if (isTauri() && !isAndroid()) {
+        void emit('remote-event', event).catch(error => {
+          console.error('Unable to broadcast FluidNC state to remote browsers.', error)
+        })
+      }
     })
     return () => {
       unsubscribe()
-      client.disconnect()
+      if (client instanceof FluidNC) client.disconnect()
     }
-  }, [client])
+  }, [client, remoteMode])
 
   useEffect(() => {
-    if (!isTauri() || !settingsReady || window.location.pathname === '/spike' || autoConnectAttemptedRef.current) return
+    if (!isTauri() || isAndroid() || remoteMode) return
+    let active = true
+    let unlisten: (() => void) | undefined
+    void listen('remote-request', event => {
+      const request = event.payload
+      if (
+        request == null ||
+        typeof request !== 'object' ||
+        !('id' in request) ||
+        typeof request.id !== 'string' ||
+        !('method' in request) ||
+        typeof request.method !== 'string'
+      ) {
+        console.warn('Ignoring malformed remote control request.')
+        return
+      }
+      const requestId = request.id
+      const method = request.method
+      const args = 'args' in request ? request.args : []
+      void (async () => {
+        try {
+          let result: unknown
+          if (method === 'setPlannerState') {
+            const state = applyPlannerState(requiredRemoteArgs(args)[0])
+            result = null
+            await emit('remote-event', { type: 'planner-state', state })
+          } else if (method === 'snapshot') {
+            const snapshot = await dispatchRemoteRequest(client, method, args)
+            if (snapshot == null || typeof snapshot !== 'object') throw new Error('Could not read the desktop state.')
+            result = { ...snapshot, plannerState: plannerStateRef.current }
+          } else {
+            result = await dispatchRemoteRequest(client, method, args)
+          }
+          await emit('remote-response', { id: requestId, result })
+        } catch (reason) {
+          const errorMessage = reason instanceof Error ? reason.message : String(reason)
+          console.error(`Remote operation "${method}" failed.`, reason)
+          await emit('remote-response', { id: requestId, error: errorMessage }).catch(error => {
+            console.error('Unable to return the remote operation error.', error)
+          })
+        }
+      })()
+    }).then(removeListener => {
+      if (active) unlisten = removeListener
+      else removeListener()
+    }).catch(error => {
+      console.error('Unable to listen for remote control requests.', error)
+      setMessage('Remote controls are unavailable. See the app log for details.')
+      setError(true)
+    })
+    return () => {
+      active = false
+      unlisten?.()
+    }
+  }, [client, remoteMode])
+
+  useEffect(() => {
+    if (remoteMode) {
+      if (!(client instanceof RemoteFluidNC) || !client.plannerReady) return
+      void client.syncPlannerState(plannerState).catch(reason => {
+        console.error('Unable to synchronize planner state with the desktop.', reason)
+        notify('Planner changes could not be synchronized with the desktop.', true)
+      })
+      return
+    }
+    if (!isTauri() || isAndroid()) return
+    void emit('remote-event', { type: 'planner-state', state: plannerState }).catch(reason => {
+      console.error('Unable to broadcast the desktop planner state.', reason)
+    })
+  }, [client, remoteMode, plannerState])
+
+  useEffect(() => {
+    if (activeDialog !== 'remoteAccess' || !isTauri() || isAndroid()) return
+    let active = true
+    void invoke<RemoteAccessInfo | null>('get_remote_access').then(info => {
+      if (active) {
+        setRemoteInfo(info)
+        setRemoteError('')
+      }
+    }).catch(error => {
+      console.error('Unable to read the remote access status.', error)
+      if (active) setRemoteError('Could not read remote access status. See the app log for details.')
+    })
+    return () => { active = false }
+  }, [activeDialog])
+
+  useEffect(() => {
+    if (!(client instanceof FluidNC) || !isTauri() || !settingsReady || window.location.pathname === '/spike' || autoConnectAttemptedRef.current) return
     let active = true
     const timer = window.setTimeout(() => {
       if (!active || autoConnectAttemptedRef.current) return
@@ -401,7 +652,7 @@ function App() {
   }, [address, client, settingsReady])
 
   useEffect(() => {
-    if (!isTauri() || !settingsReady) return
+    if (!(client instanceof FluidNC) || !isTauri() || !settingsReady) return
     const reconnectOnResume = () => {
       if (document.visibilityState !== 'visible' || client.connected) return
       void client.connect(address).then(reason => {
@@ -536,6 +787,19 @@ function App() {
     setError(bad)
   }
 
+  function applyPlannerState(value: unknown): PlannerSyncState {
+    const state = validatePlannerSyncState(value)
+    plannerStateRef.current = state
+    setRaw(state.raw)
+    setAnchors(state.anchors)
+    setAnchorAuto(state.anchorAuto)
+    setSequence(state.sequence)
+    setMeasurements(state.measurements)
+    setAddress(state.address)
+    setFileName(state.fileName)
+    return state
+  }
+
   function askConfirmation(text: string): Promise<boolean> {
     if (confirmationResolverRef.current) return Promise.resolve(false)
     setConfirmation(text)
@@ -640,13 +904,62 @@ function App() {
   }
 
   async function connect() {
-    if (connected) {
-      client.disconnect()
+    if (client instanceof RemoteFluidNC) {
+      notify('The phone is connected to the desktop server. FluidNC connection is managed by the desktop app.')
       return
     }
-    const result = await client.connect(address)
-    if (result) notify(result, true)
-    else notify('Connected to FluidNC.')
+    try {
+      if (connected) {
+        await client.disconnect()
+        return
+      }
+      const result = await client.connect(address)
+      if (result) notify(result, true)
+      else notify('Connected to FluidNC.')
+    } catch (reason) {
+      notify(`Could not connect to Filum: ${reason instanceof Error ? reason.message : String(reason)}`, true)
+    }
+  }
+
+  async function startRemoteAccess() {
+    setRemoteBusy(true)
+    setRemoteError('')
+    try {
+      const info = await invoke<RemoteAccessInfo>('start_remote_access')
+      setRemoteInfo(info)
+    } catch (reason) {
+      const text = reason instanceof Error ? reason.message : String(reason)
+      setRemoteError(text)
+      console.error('Unable to start remote access.', reason)
+    } finally {
+      setRemoteBusy(false)
+    }
+  }
+
+  async function stopRemoteAccess() {
+    setRemoteBusy(true)
+    setRemoteError('')
+    try {
+      await invoke('stop_remote_access')
+      setRemoteInfo(null)
+    } catch (reason) {
+      const text = reason instanceof Error ? reason.message : String(reason)
+      setRemoteError(text)
+      console.error('Unable to stop remote access.', reason)
+    } finally {
+      setRemoteBusy(false)
+    }
+  }
+
+  async function copyRemoteLink() {
+    if (!remoteInfo) return
+    const url = `http://${remoteInfo.address}:${remoteInfo.port}/?remote=1`
+    try {
+      await writeClipboardText(url)
+      notify('Remote access link copied. Open it in your phone browser on the same Wi-Fi.')
+    } catch (reason) {
+      notify(`Could not copy the remote access link: ${reason instanceof Error ? reason.message : String(reason)}`, true)
+    }
   }
 
   async function moveToNail(nail: number): Promise<boolean> {
@@ -1117,7 +1430,7 @@ function App() {
               >{menu[0].toUpperCase() + menu.slice(1)}</button>
               {activePopup === menu && (
                 <div className="menu-popup" role="menu">
-                  {renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction)}
+                  {renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction, remoteMode)}
                 </div>
               )}
             </div>
@@ -1135,12 +1448,24 @@ function App() {
         >
           <span /><span /><span />
         </button>
-        <button className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}. Click to disconnect.` : 'Not connected to FluidNC. Click to connect.'} onClick={() => void connect()}>
-          <i />
-          {connected ? machineStatus.state : 'Connect'}
-        </button>
+        {remoteMode ? (
+          <span className={`connection-pill ${remoteReady ? 'connected' : ''}`} title={remoteReady ? `Connected to the Filum desktop server. FluidNC: ${connected ? machineStatus.state : 'disconnected'}.` : 'Not connected to the Filum desktop server.'}>
+            <i />
+            {remoteReady ? 'Desktop server' : 'Connecting…'}
+          </span>
+        ) : (
+          <button className={`connection-pill ${connected ? 'connected' : ''}`} title={connected ? `Connected to FluidNC: ${machineStatus.state}. Click to disconnect.` : 'Not connected to FluidNC. Click to connect.'} onClick={() => void connect()}>
+            <i />
+            {connected ? machineStatus.state : 'Connect'}
+          </button>
+        )}
         <button className="top-stop-button" title="Stop motion and reset the controller." disabled={!connected} onClick={stopMachine}>■ <span>Stop</span></button>
       </header>
+      {remoteMode && (
+        <div className="remote-banner" role="status">
+          Remote control{remoteReady ? ' · commands run through Filum on the laptop.' : ' · connecting to Filum on the laptop…'}
+        </div>
+      )}
       {mobileMenuOpen && (
         <div className="mobile-menu-backdrop" onClick={() => { setMobileMenuOpen(false); setActivePopup(null) }}>
           <nav
@@ -1176,7 +1501,7 @@ function App() {
                   <span>{menu[0].toUpperCase() + menu.slice(1)}</span>
                   <span className="mobile-menu-chevron" aria-hidden="true">{activePopup === menu ? '▴' : '▾'}</span>
                 </button>
-                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction)}</div>}
+                {activePopup === menu && <div className="mobile-menu-items" role="menu">{renderMenuItems(menu, openDialog, openSequencePicker, runMenuAction, remoteMode)}</div>}
               </section>
             ))}
           </nav>
@@ -1292,8 +1617,13 @@ function App() {
           <section className="connection-panel">
             <h2>Nail calibration &amp; FluidNC</h2>
             <div className="connect-row">
-              <input value={address} aria-label="FluidNC address" title="FluidNC web address, for example http://192.168.1.32/." onChange={event => setAddress(event.target.value)} />
-              <button title={connected ? 'Disconnect from the FluidNC controller.' : 'Connect to the FluidNC controller at the address above.'} onClick={() => void connect()}>{connected ? 'Disconnect' : 'Connect'}</button>
+              {!remoteMode && (
+                <>
+                  <input value={address} aria-label="FluidNC address" title="FluidNC web address, for example http://192.168.1.32/." onChange={event => setAddress(event.target.value)} />
+                  <button title={connected ? 'Disconnect from the FluidNC controller.' : 'Connect to the FluidNC controller at the address above.'} onClick={() => void connect()}>{connected ? 'Disconnect' : 'Connect'}</button>
+                </>
+              )}
+              {remoteMode && <span className="hint">Controller connection is managed by the desktop app.</span>}
             </div>
             <p className="controller-status">
               {connected ? `${machineStatus.state} · X ${machineStatus.pos?.[0].toFixed(3) ?? '-'} · Y ${machineStatus.pos?.[1].toFixed(3) ?? '-'} · ${measuredCount} nails measured` : `Not connected · ${measuredCount} nails measured`}
@@ -1609,6 +1939,40 @@ function App() {
           </ul>
           <p className="hint">Only use machine controls when the bed is clear and the machine is safe to move.</p>
         </div>
+      </AppDialog>
+      <AppDialog open={activeDialog === 'remoteAccess'} title="Remote access" onClose={() => setActiveDialog(null)}>
+        {isTauri() && !isAndroid() ? (
+          <div className="remote-access-content">
+            <p>Start a temporary local server, then open its link in your phone browser while both devices are on the same Wi-Fi network. The desktop app remains connected to FluidNC and handles all machine commands.</p>
+            {remoteInfo ? (
+              <>
+                <label className="remote-link-field">
+                  <span>Private remote access link</span>
+                  <input
+                    readOnly
+                    value={`http://${remoteInfo.address}:${remoteInfo.port}/?remote=1`}
+                    onFocus={event => event.currentTarget.select()}
+                  />
+                </label>
+                <p className="hint">Keep this link private: anyone who has it can control this machine while remote access is enabled.</p>
+                <div className="inline-actions">
+                  <button className="primary" onClick={() => void copyRemoteLink()}>Copy link</button>
+                  <button className="danger" disabled={remoteBusy} onClick={() => void stopRemoteAccess()}>
+                    {remoteBusy ? 'Stopping…' : 'Stop remote access'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button className="primary" disabled={remoteBusy} onClick={() => void startRemoteAccess()}>
+                {remoteBusy ? 'Starting…' : 'Start remote access'}
+              </button>
+            )}
+            {remoteError && <p className="remote-error" role="alert">{remoteError}</p>}
+            <p className="hint">This uses unencrypted HTTP/WebSocket on your local network. Use a trusted private Wi-Fi network only, and stop remote access when finished.</p>
+          </div>
+        ) : (
+          <p>Remote access is started from the Filum desktop app. Open <b>Machine → Remote access</b> on your laptop.</p>
+        )}
       </AppDialog>
       <AppDialog
         open={confirmation !== null}

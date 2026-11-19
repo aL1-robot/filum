@@ -74,6 +74,12 @@ Tauri's generated icon is a placeholder; replace it with Filum artwork and regen
 
 The packaged app uses the Rust-backed Tauri WebSocket and HTTP plugins; browser development uses the WebView's native APIs. FluidNC's existing endpoint fallback order and `webui-v3` subprotocol are retained. Tauri's HTTP plugin scope permits only the `/upload` path over HTTP; `boardURL` validates that upload targets are private IPv4 addresses or localhost before sending. Tauri's WebSocket plugin does not expose a URL-scope permission, so the app only constructs its existing FluidNC port/path attempts from the configured board address. The generated Android debug variant permits cleartext traffic for local FluidNC HTTP; review the Android network policy before distributing a release build.
 
+### Control the desktop from a phone browser
+
+In the desktop app, select **Machine → Remote access**, start the server, then copy the generated link to your phone. Open it in a browser while the phone and laptop are on the same trusted Wi-Fi network. The desktop serves the existing Filum UI; planner settings, sequence, and calibration changes stay synchronized, and machine commands are relayed to the desktop's FluidNC connection, so the phone does not open a second connection to the controller. Opening the server's IP directly redirects into remote-control mode. The server uses port 8080 by default and selects an available port only if 8080 is already occupied. **Stop remote access** when finished. Access is opt-in and ends when stopped or when Filum exits.
+
+No access token is required: anyone on the same local network who can reach the laptop's server can open Filum and control the machine while remote access is running. Use this only on a trusted private network; the local HTTP and WebSocket traffic is unencrypted. The server accepts browser control connections only from local/private network addresses, requires a same-origin request, and limits concurrent browser connections. Ensure your operating-system firewall permits the server's selected port on the private network.
+
 To test board connectivity, open `/spike` in a Tauri or Android build (or use `?spike=1`). It compares the WebView and Rust-backed transports, uploads small uniquely named text files, and leaves them on the board SD card. Verify the Rust transport and SD listing on the same network before running a real job.
 
 ### Files, persistence, and mobile behavior

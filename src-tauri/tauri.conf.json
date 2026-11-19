@@ -1,12 +1,12 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "filum",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "dev.bernallian.filum",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm run build && pnpm dev",
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
@@ -27,6 +27,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": {
+      "../dist/": "remote-ui/"
+    },
     "targets": [
       "deb",
       "rpm",
