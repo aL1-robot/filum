@@ -393,7 +393,7 @@ function App() {
   const [measureStep, setMeasureStep] = useState(9)
   const [clearance, setClearance] = useState(1.5)
   const [travelMargin, setTravelMargin] = useState(5)
-  const [jogStep, setJogStep] = useState(0.25)
+  const [jogStep, setJogStep] = useState(100)
   const [filesKind, setFilesKind] = useState<'SD' | 'LocalFS'>('SD')
   const [files, setFiles] = useState<BoardFile[]>([])
   const [filesInfo, setFilesInfo] = useState('Connect to FluidNC to browse files')
@@ -825,9 +825,9 @@ function App() {
       } else if (event.key === 'd' || event.key === 'D') {
         jogRingRef.current('cw', event.shiftKey)
       } else if (event.key === '[') {
-        setJogStep(current => STEPS[Math.max(0, STEPS.indexOf(current) - 1)])
+        setJogStep(current => STEPS.filter(step => step < current).at(-1) ?? current)
       } else if (event.key === ']') {
-        setJogStep(current => STEPS[Math.min(STEPS.length - 1, STEPS.indexOf(current) + 1)])
+        setJogStep(current => STEPS.find(step => step > current) ?? current)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -1723,9 +1723,28 @@ function App() {
               <button title="Home the Y axis." disabled={!connected || acting || busyWithBoard} onClick={() => void home('$HY', 'Y')}>Y</button>
             </div>
             <div className="jog-controls" title="Use the arrow keys to jog XY, W/S to jog out/in, A/D to jog around the ring, Shift for 10× movement, and [ or ] to change the step.">
-              <div className="step-buttons"><span>Jog step</span>{STEPS.map(step => (
-                <button className={jogStep === step ? 'selected' : ''} title={`Set the jog increment to ${step} mm.`} key={step} onClick={() => setJogStep(step)}>{step}</button>
-              ))}</div>
+              <div className="step-buttons">
+                <span>Jog step</span>
+                {STEPS.map(step => (
+                  <button className={jogStep === step ? 'selected' : ''} title={`Set the jog increment to ${step} mm.`} key={step} onClick={() => setJogStep(step)}>{step}</button>
+                ))}
+                <label className="custom-jog-step">
+                  Custom
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="any"
+                    value={jogStep}
+                    aria-label="Custom jog step in millimeters"
+                    title="Set a custom jog distance in millimeters."
+                    onChange={event => {
+                      const step = event.currentTarget.valueAsNumber
+                      if (Number.isFinite(step) && step > 0) setJogStep(step)
+                    }}
+                  />
+                  <span>mm</span>
+                </label>
+              </div>
               <div className="jog-layout">
                 <span>XY</span>
                 <div className="jog-pad">

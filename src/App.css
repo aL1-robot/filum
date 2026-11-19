@@ -636,6 +636,22 @@ button.danger {
   padding: 2px 6px;
 }
 
+.custom-jog-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.custom-jog-step input {
+  width: 68px;
+  min-width: 0;
+  min-height: 24px;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
 .jog-layout {
   display: grid;
   grid-template-columns: 28px 112px 35px 112px;
